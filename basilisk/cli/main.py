@@ -131,6 +131,42 @@ def list_modules() -> None:
         console.print(f"[red]Error loading modules: {e}[/red]")
 
 
+@cli.command("interactive")
+@click.option("-t", "--target", required=True, help="Target URL or API endpoint")
+@click.option("-p", "--provider", default="openai", help="LLM provider")
+@click.option("-m", "--model", default="", help="Model name")
+@click.option("-k", "--api-key", default="", help="API key")
+@click.option("--auth", default="", help="Authorization header")
+@click.option("-v", "--verbose", is_flag=True)
+def interactive(target, provider, model, api_key, auth, verbose) -> None:
+    """Launch interactive REPL for manual + assisted red teaming."""
+    import asyncio
+
+    console.print(BANNER, style="bold red")
+    console.print()
+
+    from basilisk.cli.interactive import run_interactive
+
+    asyncio.run(run_interactive(
+        target=target, provider=provider, model=model,
+        api_key=api_key, auth=auth, verbose=verbose,
+    ))
+
+
+@cli.command("sessions")
+@click.option("--db", default="./basilisk-sessions.db", help="Session database path")
+def sessions(db) -> None:
+    """List all saved scan sessions."""
+    import asyncio
+
+    console.print(BANNER, style="bold red")
+    console.print()
+
+    from basilisk.cli.replay import list_sessions
+
+    asyncio.run(list_sessions(db_path=db))
+
+
 @cli.command("version")
 def version() -> None:
     """Show Basilisk version and system info."""

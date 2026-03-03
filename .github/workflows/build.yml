@@ -1,0 +1,159 @@
+name: Build Basilisk Desktop
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install pyinstaller
+
+      - name: Install Extra Python Dependencies
+        run: |
+          pip install uvicorn fastapi websockets aiohttp pyyaml click rich jinja2 litellm
+        shell: bash
+
+      - name: Install Linux Build Dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libarchive-tools
+
+      - name: Compile Python Sidecar
+        run: |
+          pyinstaller basilisk-backend.spec
+
+      - name: Prepare Desktop Folder (Linux/macOS)
+        if: runner.os != 'Windows'
+        run: |
+          mkdir -p desktop/bin
+          cp dist/basilisk-backend desktop/bin/
+        shell: bash
+
+      - name: Prepare Desktop Folder (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          mkdir -p desktop/bin
+          cp dist/basilisk-backend.exe desktop/bin/basilisk-backend.exe
+        shell: bash
+
+      - name: Install Desktop Dependencies
+        working-directory: ./desktop
+        run: npm install
+
+      - name: Prepare Icons
+        working-directory: ./desktop
+        run: |
+          mkdir -p build
+          cp src/assets/logo.jpg build/icon.png || true
+        shell: bash
+
+      - name: Copy License
+        working-directory: ./desktop
+        run: |
+          cp ../LICENSE LICENSE.txt || echo "MIT License" > LICENSE.txt
+        shell: bash
+
+      - name: Build Electron App
+        working-directory: ./desktop
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx electron-builder --publish never
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Basilisk-${{ matrix.os }}
+          path: |
+            desktop/dist/*.exe
+            desktop/dist/*.dmg
+            desktop/dist/*.AppImage
+            desktop/dist/*.pacman
+            desktop/dist/*.deb
+            desktop/dist/*.rpm
+          if-no-files-found: warn
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download All Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: List Downloaded Files
+        run: find artifacts/ -type f | head -50
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Basilisk ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          generate_release_notes: false
+          body: |
+            ## 🐍 Basilisk ${{ github.ref_name }}
+
+            AI Red Teaming Framework — Smart Prompt Evolution for LLM Security Testing.
+
+            ### Downloads
+
+            | Platform | File |
+            |---|---|
+            | **Windows** | `.exe` (NSIS installer) |
+            | **macOS** | `.dmg` (Apple Disk Image) |
+            | **Linux (Universal)** | `.AppImage` |
+            | **Arch Linux** | `.pacman` |
+            | **Ubuntu/Debian** | `.deb` |
+            | **Fedora/RHEL** | `.rpm` |
+
+            ### Install via pip
+            ```bash
+            pip install basilisk-ai
+            ```
+
+            ### Install via Docker
+            ```bash
+            docker pull rothackers/basilisk
+            docker run --rm rothackers/basilisk scan --help
+            ```
+
+            **Full Changelog**: https://github.com/noobforanonymous/basilisk/compare/.../${{ github.ref_name }}
+          files: |
+            artifacts/**/*.exe
+            artifacts/**/*.dmg
+            artifacts/**/*.AppImage
+            artifacts/**/*.pacman
+            artifacts/**/*.deb
+            artifacts/**/*.rpm

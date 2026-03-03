@@ -97,12 +97,49 @@ packaging/**/*.pkg.tar.zst
 *.whl
 
 # =========================
+# PyInstaller
+# =========================
+build/basilisk-backend/
+dist/basilisk-backend
+dist/basilisk-backend.exe
+*.manifest
+*.spec.bak
+
+# =========================
+# Electron / Desktop App
+# =========================
+desktop/dist/
+desktop/bin/
+desktop/node_modules/
+desktop/package-lock.json
+desktop/LICENSE.txt
+desktop/build/icon.png
+desktop/build/icon.ico
+desktop/build/icon.icns
+
+# =========================
+# Native compiled extensions
+# =========================
+native/c/*.o
+native/go/fuzzer/fuzzer
+native/go/matcher/matcher
+basilisk/native_libs/*.so
+basilisk/native_libs/*.dylib
+basilisk/native_libs/*.dll
+
+# =========================
+# Scan output / Reports
+# =========================
+basilisk-reports/
+basilisk-sessions.db
+
+# =========================
 # Documentation builds
 # =========================
 docs/_build/
 
 # =========================
-# Node (for dashboard static tooling if added later)
+# Node
 # =========================
 node_modules/
 npm-debug.log*
@@ -141,3 +178,8 @@ temp/
 # Jupyter
 # =========================
 .ipynb_checkpoints/
+
+# =========================
+# Gemini / AI agent
+# =========================
+.gemini/

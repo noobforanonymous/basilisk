@@ -2,19 +2,78 @@
     "name": "basilisk-desktop",
     "version": "0.1.0",
     "description": "Basilisk — AI Red Teaming Desktop Application",
+    "homepage": "https://github.com/noobforanonymous/basilisk",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/noobforanonymous/basilisk.git"
+    },
     "main": "main.js",
     "scripts": {
         "start": "electron .",
         "dev": "electron .",
+        "dist": "electron-builder",
         "build": "electron-builder",
         "build:linux": "electron-builder --linux",
         "build:win": "electron-builder --win",
         "build:mac": "electron-builder --mac",
         "pack": "electron-builder --dir"
     },
+    "keywords": [
+        "ai",
+        "red-team",
+        "llm",
+        "security",
+        "pentesting",
+        "vulnerability"
+    ],
+    "author": "Regaan <contact@rothackers.com> (https://rothackers.com)",
+    "license": "MIT",
+    "type": "commonjs",
+    "devDependencies": {
+        "electron": "^28.0.0",
+        "electron-builder": "^24.9.1"
+    },
+    "dependencies": {
+        "electron-store": "^8.1.0"
+    },
     "build": {
         "appId": "com.rothackers.basilisk",
         "productName": "Basilisk",
+        "icon": "build/icon.png",
+        "linux": {
+            "target": [
+                "pacman",
+                "AppImage",
+                "deb",
+                "rpm"
+            ],
+            "icon": "build/icon.png",
+            "executableName": "basilisk",
+            "artifactName": "basilisk-${version}.${ext}",
+            "category": "Security",
+            "maintainer": "Rot Hackers <contact@rothackers.com>"
+        },
+        "win": {
+            "target": "nsis",
+            "icon": "build/icon.ico"
+        },
+        "mac": {
+            "target": "dmg",
+            "icon": "build/icon.icns",
+            "category": "public.app-category.developer-tools"
+        },
+        "nsis": {
+            "oneClick": false,
+            "allowToChangeInstallationDirectory": true,
+            "createDesktopShortcut": true,
+            "createStartMenuShortcut": true,
+            "license": "LICENSE.txt"
+        },
+        "pacman": {
+            "depends": [
+                "hicolor-icon-theme"
+            ]
+        },
         "directories": {
             "output": "dist"
         },
@@ -23,51 +82,14 @@
             "preload.js",
             "src/**/*"
         ],
-        "linux": {
-            "target": [
-                "AppImage",
-                "deb",
-                "rpm"
-            ],
-            "category": "Development",
-            "icon": "build/icon.png"
-        },
-        "win": {
-            "target": [
-                "nsis",
-                "portable"
-            ],
-            "icon": "build/icon.ico"
-        },
-        "mac": {
-            "target": [
-                "dmg"
-            ],
-            "icon": "build/icon.icns"
-        },
         "extraResources": [
             {
-                "from": "../basilisk",
-                "to": "basilisk",
+                "from": "bin",
+                "to": "bin",
                 "filter": [
-                    "**/*.py",
-                    "**/*.yaml",
-                    "**/*.yml"
+                    "**/*"
                 ]
             }
         ]
-    },
-    "dependencies": {
-        "electron-store": "^8.1.0"
-    },
-    "devDependencies": {
-        "electron": "^28.0.0",
-        "electron-builder": "^24.9.1"
-    },
-    "author": "Rot Hackers <team@rothackers.xyz>",
-    "license": "MIT",
-    "repository": {
-        "type": "git",
-        "url": "https://github.com/rothackers/basilisk"
     }
 }

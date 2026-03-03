@@ -29,7 +29,7 @@ tabs.forEach(t => {
         if (v) v.classList.add('active');
         // lazy load
         if (t.dataset.v === 'modules') loadModules();
-        if (t.dataset.v === 'sessions') loadSessions();
+        if (t.dataset.v === 'sessions' || t.dataset.v === 'reports') loadSessions();
         if (t.dataset.v === 'settings') loadNative();
     });
 });
@@ -86,9 +86,95 @@ let poll = setInterval(async () => {
         clearInterval(poll);
         loadNative();
         loadModules();
+        connectWebSocket();
     }
 }, 2000);
 checkBackend();
+
+// ── WebSocket for real-time scan events ──
+let ws = null;
+let wsRetries = 0;
+
+function connectWebSocket() {
+    if (wsRetries >= 5) return;
+    try {
+        ws = new WebSocket('ws://127.0.0.1:8741/ws');
+        ws.onopen = () => { wsRetries = 0; log('ok', 'WebSocket connected.'); };
+        ws.onmessage = (evt) => {
+            try {
+                const msg = JSON.parse(evt.data);
+                handleWSEvent(msg.event, msg.data);
+            } catch { }
+        };
+        ws.onclose = () => {
+            wsRetries++;
+            if (wsRetries === 1) log('dim', 'WebSocket disconnected — using HTTP polling.');
+            if (wsRetries < 5) setTimeout(connectWebSocket, 5000);
+        };
+        ws.onerror = () => { };
+    } catch { }
+}
+
+function handleWSEvent(event, data) {
+    switch (event) {
+        case 'scan:status':
+            log('inf', `Scan phase: ${data.phase}`);
+            break;
+        case 'scan:progress':
+            if (data.progress !== undefined) {
+                const bar = document.getElementById('scan-bar');
+                if (bar) bar.style.width = `${Math.round(data.progress * 100)}%`;
+            }
+            if (data.module) {
+                const phase = document.getElementById('scan-phase');
+                if (phase) phase.innerText = data.module;
+            }
+            break;
+        case 'scan:finding':
+            if (data.finding) {
+                if (!allFindings.find(x => x.title === data.finding.title && x.attack_module === data.finding.attack_module)) {
+                    allFindings.push(data.finding);
+                    addFinding(document.getElementById('live-findings'), data.finding);
+                    addFinding(document.getElementById('dash-findings'), data.finding);
+                    log('err', `VULN [${data.finding.severity}] ${data.finding.title}`);
+                    updateSev();
+                    updateTable();
+                    const lc = document.getElementById('live-count');
+                    if (lc) lc.innerText = `${allFindings.length} detected`;
+                    document.getElementById('k-findings').innerText = allFindings.length;
+                }
+            }
+            break;
+        case 'scan:profile':
+            if (data.profile) updateRecon(data.profile);
+            break;
+        case 'scan:complete':
+            log('ok', `Scan complete. ${data.total_findings} findings.`);
+            resetScan();
+            const p = document.getElementById('k-posture');
+            if (allFindings.length === 0) { p.innerText = 'SECURE'; p.className = 'kpi-value safe'; }
+            else {
+                const hasCrit = allFindings.some(f => f.severity === 'CRITICAL' || f.severity === 'HIGH');
+                p.innerText = hasCrit ? 'COMPROMISED' : 'AT RISK';
+                p.className = `kpi-value ${hasCrit ? 'danger' : 'warn'}`;
+            }
+            break;
+        case 'scan:error':
+            log('err', `Scan error: ${data.error}`);
+            resetScan();
+            break;
+    }
+}
+
+function updateRecon(profile) {
+    const safe = (id, val) => { const el = document.getElementById(id); if (el) el.innerText = val || '—'; };
+    safe('r-model', profile.model_family);
+    safe('r-creator', profile.creator);
+    safe('r-ctx', profile.context_window ? `${profile.context_window}` : null);
+    safe('r-guard', profile.has_guardrails ? 'Yes' : 'No');
+    safe('r-tools', profile.has_tools ? 'Yes' : 'No');
+    safe('r-rag', profile.has_rag ? 'Yes' : 'No');
+}
 
 // ── Timer ──
 const timerEl = document.getElementById('scan-timer');
@@ -313,15 +399,26 @@ const MUTATIONS = [
     { name: 'Delimiter', lang: 'Go', desc: 'System instruction delimiter injection' },
 ];
 
-function loadModules() {
+async function loadModules() {
     const grid = document.getElementById('mod-grid');
     grid.innerHTML = '';
-    MODULES.forEach(m => {
+
+    // Try fetching from backend, fallback to hardcoded
+    let moduleList = MODULES;
+    try {
+        const data = await apiFetch('/api/modules');
+        if (data.modules?.length) {
+            moduleList = data.modules.map(m => ({
+                name: m.name, cat: m.category, owasp: m.owasp_id || '', desc: m.description
+            }));
+        }
+    } catch { }
+
+    moduleList.forEach(m => {
         const el = document.createElement('div');
         el.className = 'mod-card';
         el.innerHTML = `<div class="mod-top"><span class="mod-name">${esc(m.name)}</span><span class="badge-owasp">${esc(m.owasp)}</span></div><div class="mod-cat">${esc(m.cat)}</div><div class="mod-desc">${esc(m.desc)}</div>`;
         el.addEventListener('click', () => {
-            // Toggle expanded detail
             const existing = el.querySelector('.mod-detail');
             if (existing) { existing.remove(); return; }
             const detail = document.createElement('div');
@@ -332,7 +429,7 @@ function loadModules() {
         });
         grid.appendChild(el);
     });
-    document.getElementById('k-modules').innerText = MODULES.length;
+    document.getElementById('k-modules').innerText = moduleList.length;
 
     // Mutation grid
     const mg = document.getElementById('mut-grid');
@@ -364,6 +461,19 @@ async function loadSessions() {
     const b = document.getElementById('b-sessions');
     b.innerText = data.sessions.length; b.classList.remove('hidden');
     document.getElementById('k-scans').innerText = data.sessions.length;
+
+    // Also populate Reports session dropdown
+    const rptSel = document.getElementById('rpt-sess');
+    if (rptSel) {
+        rptSel.innerHTML = '<option value="">Select…</option>';
+        data.sessions.forEach(s => {
+            const opt = document.createElement('option');
+            opt.value = s.id;
+            opt.innerText = `${s.target || s.id.slice(0, 12)} (${s.status})`;
+            rptSel.appendChild(opt);
+        });
+    }
+
     data.sessions.forEach(s => {
         const el = document.createElement('div');
         el.className = 'sess-item';

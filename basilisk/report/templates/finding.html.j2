@@ -1,0 +1,36 @@
+<div class="finding" style="border-left: 4px solid {{ color }};">
+    <div style="display:flex;gap:.5rem;align-items:center;margin-bottom:.5rem;">
+        <span class="sev-badge" style="background:{{ color }};">{{ severity }}</span>
+        <span style="color:#737373;font-size:.8rem;">{{ id }}</span>
+        <span style="color:#22d3ee;font-size:.8rem;">{{ owasp_id }}</span>
+        {% if evolution_gen %}
+        <span style="color:#a78bfa;font-size:.75rem;background:#1e1b4b;padding:2px 8px;border-radius:3px;">Gen {{ evolution_gen }}</span>
+        {% endif %}
+    </div>
+    <h3>{{ title }}</h3>
+    <p style="color:#a3a3a3;font-size:.9rem;">{{ description }}</p>
+    <div style="display:flex;gap:1.5rem;margin:.5rem 0;font-size:.85rem;color:#a3a3a3;">
+        <span>Module: <code>{{ module }}</code></span>
+        <span>Confidence: <strong>{{ confidence }}</strong></span>
+    </div>
+    <details>
+        <summary>Payload</summary>
+        <pre><code>{{ payload }}</code></pre>
+    </details>
+    <details>
+        <summary>Response</summary>
+        <pre><code>{{ response }}</code></pre>
+    </details>
+    {% if conversation %}
+    <div style="margin-top:1rem;border-top:1px solid #262626;padding-top:.8rem;">
+        <h4 style="font-size:.85rem;color:#a3a3a3;">Conversation Replay</h4>
+        {% for msg in conversation %}
+        <div style="padding:.5rem;margin:.3rem 0;border-radius:4px;font-size:.85rem;{% if msg.role == 'user' %}background:#1e293b;{% else %}background:#1a2e1a;{% endif %}">
+            <span style="font-weight:600;margin-right:.5rem;{% if msg.role == 'user' %}color:#60a5fa;{% else %}color:#4ade80;{% endif %}">{{ msg.role }}</span>
+            <span style="color:#d4d4d4;">{{ msg.content }}</span>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+    <p class="remediation"><strong>Remediation:</strong> {{ remediation }}</p>
+</div>
