@@ -67,6 +67,12 @@ Issues = "https://github.com/noobforanonymous/basilisk/issues"
 [project.scripts]
 basilisk = "basilisk.cli.main:cli"
 
+[tool.hatch.build.targets.wheel]
+packages = ["basilisk"]
+
+[tool.hatch.build.targets.sdist]
+include = ["basilisk/", "README.md", "LICENSE", "pyproject.toml", "requirements.txt"]
+
 [tool.ruff]
 target-version = "py311"
 line-length = 100

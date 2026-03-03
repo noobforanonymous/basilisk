@@ -1,7 +1,7 @@
 # Basilisk — AI Red Teaming Framework
 # Multi-stage build for smaller image size
 
-FROM python:3.11-slim as builder
+FROM python:3.11-slim AS builder
 
 # Set working directory
 WORKDIR /app
@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy project files
-COPY setup.py pyproject.toml README.md ./
+COPY pyproject.toml README.md requirements.txt ./
 COPY basilisk/ ./basilisk/
 
 # Install Python dependencies
