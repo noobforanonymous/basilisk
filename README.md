@@ -17,6 +17,7 @@
   <a href="https://github.com/noobforanonymous/basilisk/actions/workflows/build.yml"><img src="https://github.com/noobforanonymous/basilisk/actions/workflows/build.yml/badge.svg" alt="Build Desktop" /></a>
   <a href="https://github.com/noobforanonymous/basilisk/actions/workflows/docker-build.yml"><img src="https://github.com/noobforanonymous/basilisk/actions/workflows/docker-build.yml/badge.svg" alt="Docker" /></a>
   <a href="https://github.com/noobforanonymous/basilisk/actions/workflows/python-publish.yml"><img src="https://github.com/noobforanonymous/basilisk/actions/workflows/python-publish.yml/badge.svg" alt="PyPI" /></a>
+  <a href="https://github.com/noobforanonymous/basilisk/actions/workflows/test-action.yml"><img src="https://github.com/noobforanonymous/basilisk/actions/workflows/test-action.yml/badge.svg" alt="Test Action" /></a>
   <a href="https://github.com/marketplace/actions/basilisk-ai-security-scan"><img src="https://img.shields.io/badge/Marketplace-Action-blue?logo=github" alt="GitHub Marketplace" /></a>
 </p>
 

@@ -1,0 +1,33 @@
+name: Test Basilisk Action
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'basilisk/**'
+      - 'action.yml'
+
+jobs:
+  test-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Basilisk AI Security Scan
+        uses: ./
+        with:
+          target: 'https://basilisk-vulnbot.onrender.com/v1/chat/completions'
+          provider: github
+          github-token: ${{ secrets.GH_MODELS_TOKEN }}
+          model: gpt-4o-mini
+          mode: quick
+          fail-on: critical
+          output: sarif
+
+      - name: Upload SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: ./basilisk-reports/
+        continue-on-error: true
