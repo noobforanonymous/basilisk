@@ -92,7 +92,11 @@ runs:
     - name: Install Basilisk
       shell: bash
       run: |
-        pip install --quiet basilisk-ai
+        if [ -f "${{ github.action_path }}/pyproject.toml" ]; then
+          pip install --quiet "${{ github.action_path }}"
+        else
+          pip install --quiet basilisk-ai
+        fi
 
     - name: Run Posture Scan
       if: inputs.posture-only == 'true'
