@@ -14,6 +14,13 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/noobforanonymous/basilisk/actions/workflows/build.yml"><img src="https://github.com/noobforanonymous/basilisk/actions/workflows/build.yml/badge.svg" alt="Build Desktop" /></a>
+  <a href="https://github.com/noobforanonymous/basilisk/actions/workflows/docker-build.yml"><img src="https://github.com/noobforanonymous/basilisk/actions/workflows/docker-build.yml/badge.svg" alt="Docker" /></a>
+  <a href="https://github.com/noobforanonymous/basilisk/actions/workflows/python-publish.yml"><img src="https://github.com/noobforanonymous/basilisk/actions/workflows/python-publish.yml/badge.svg" alt="PyPI" /></a>
+  <a href="https://github.com/marketplace/actions/basilisk-ai-security-scan"><img src="https://img.shields.io/badge/Marketplace-Action-blue?logo=github" alt="GitHub Marketplace" /></a>
+</p>
+
+<p align="center">
   <a href="#quick-start">Quick Start</a> •
   <a href="#features">Features</a> •
   <a href="#whats-new-in-v100">What's New</a> •

@@ -130,6 +130,7 @@ jobs:
           draft: false
           prerelease: false
           generate_release_notes: false
+          fail_on_unmatched_files: false
           body: |
             ## 🐍 Basilisk ${{ github.ref_name }}
 
@@ -165,3 +166,16 @@ jobs:
             artifacts/**/*.pacman
             artifacts/**/*.deb
             artifacts/**/*.rpm
+        continue-on-error: true
+
+      - name: Upload Assets via CLI (fallback)
+        if: failure() || success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for file in artifacts/**/*.exe artifacts/**/*.dmg artifacts/**/*.AppImage artifacts/**/*.pacman artifacts/**/*.deb artifacts/**/*.rpm; do
+            if [ -f "$file" ]; then
+              gh release upload "${{ github.ref_name }}" "$file" --clobber || true
+            fi
+          done
+        shell: bash
