@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from basilisk import __version__
 from basilisk.core.session import ScanSession
 
 
@@ -97,8 +98,8 @@ def generate_sarif(session: ScanSession, path: Path) -> None:
             "tool": {
                 "driver": {
                     "name": "Basilisk",
-                    "version": "1.0.0",
-                    "semanticVersion": "1.0.0",
+                    "version": __version__,
+                    "semanticVersion": __version__,
                     "informationUri": "https://basilisk.rothackers.com",
                     "organization": "Rot Hackers",
                     "rules": rules,

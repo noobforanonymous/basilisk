@@ -239,12 +239,15 @@ def posture(target, provider, model, api_key, auth, output_dir, json_output, ver
         target=target or "direct", provider=provider, model=model,
         api_key=api_key, auth=auth,
     )
-    prov = _create_provider(cfg)
+    async def _do_posture():
+        async with _create_provider(cfg) as prov:
+            report = await run_posture_scan(
+                prov, target=target, provider_name=provider,
+                model_name=model, verbose=verbose,
+            )
+            return report
 
-    report = asyncio.run(run_posture_scan(
-        prov, target=target, provider_name=provider,
-        model_name=model, verbose=verbose,
-    ))
+    report = asyncio.run(_do_posture())
 
     if json_output:
         import json as json_mod

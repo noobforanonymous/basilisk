@@ -33,6 +33,7 @@ OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 case "${OS}" in
     linux)  SO_EXT=".so" ;;
     darwin) SO_EXT=".dylib" ;;
+    msys*|mingw*|cygwin*|windows*) SO_EXT=".dll" ;;
     *)      SO_EXT=".so" ;;
 esac
 
@@ -40,7 +41,7 @@ build_c() {
     log_info "Building C native extensions..."
 
     CC="${CC:-gcc}"
-    CFLAGS="-shared -fPIC -O3 -Wall -Wextra -Werror -march=native"
+    CFLAGS="-shared -fPIC -O3 -Wall -Wextra -Werror"
 
     mkdir -p "${BUILD_DIR}" "${LIB_DIR}"
 
@@ -60,6 +61,13 @@ build_c() {
     # Copy to Python-accessible location
     cp "${BUILD_DIR}/libbasilisk_tokens${SO_EXT}" "${LIB_DIR}/"
     cp "${BUILD_DIR}/libbasilisk_encoder${SO_EXT}" "${LIB_DIR}/"
+
+    # Also check for .dll copies if we are on Windows
+    if [[ "${SO_EXT}" == ".dll" ]]; then
+        # Some systems might not handle .dll as shared libs easily without specific naming
+        cp "${BUILD_DIR}/libbasilisk_tokens${SO_EXT}" "${LIB_DIR}/libbasilisk_tokens.dll"
+        cp "${BUILD_DIR}/libbasilisk_encoder${SO_EXT}" "${LIB_DIR}/libbasilisk_encoder.dll"
+    fi
 
     log_info "C extensions built successfully"
 }

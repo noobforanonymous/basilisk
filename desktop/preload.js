@@ -7,7 +7,7 @@ contextBridge.exposeInMainWorld('basilisk', {
         if (allowed.includes(channel)) ipcRenderer.send(channel, ...args);
     },
     invoke: (channel, ...args) => {
-        const allowed = ['dialog:exportReport', 'dialog:saveFile'];
+        const allowed = ['dialog:exportReport', 'dialog:saveFile', 'window:getToken'];
         if (allowed.includes(channel)) return ipcRenderer.invoke(channel, ...args);
         return Promise.reject(new Error(`IPC channel not allowed: ${channel}`));
     },
@@ -16,13 +16,20 @@ contextBridge.exposeInMainWorld('basilisk', {
     onBackendLog: (cb) => ipcRenderer.on('backend-log', (_, msg) => cb(msg)),
     onBackendError: (cb) => ipcRenderer.on('backend-error', (_, msg) => cb(msg)),
 
+    // Helper to get token (internal use)
+    _getToken: () => ipcRenderer.invoke('window:getToken'),
+
     // Report export shortcut
     report: {
         export: async (sessionId, format) => {
             try {
+                const token = await ipcRenderer.invoke('window:getToken');
                 const resp = await fetch(`http://127.0.0.1:8741/api/report/${sessionId}`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Basilisk-Token': token
+                    },
                     body: JSON.stringify({ format }),
                 });
                 const data = await resp.json();
@@ -46,9 +53,13 @@ contextBridge.exposeInMainWorld('basilisk', {
     apiKeys: {
         set: async (provider, key) => {
             try {
+                const token = await ipcRenderer.invoke('window:getToken');
                 await fetch(`http://127.0.0.1:8741/api/settings/apikey`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Basilisk-Token': token
+                    },
                     body: JSON.stringify({ provider, key }),
                 });
             } catch (e) { /* best effort */ }

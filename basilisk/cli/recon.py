@@ -46,32 +46,32 @@ async def run_recon_standalone(
             console.print(f"  [red]✗[/red] {err}")
         return
 
-    from basilisk.cli.scan import _create_provider, _run_recon, _print_profile
-    prov = _create_provider(cfg)
+    from basilisk.cli.scan import _create_provider, _run_recon
+    from .utils import print_profile
+    async with _create_provider(cfg) as prov:
+        # Health check
+        console.print("[dim]Checking provider connection...[/dim]")
+        healthy = await prov.health_check()
+        if not healthy:
+            console.print("[red]✗ Provider health check failed.[/red]")
+            return
+        console.print("[green]✓[/green] Provider connected\n")
 
-    # Health check
-    console.print("[dim]Checking provider connection...[/dim]")
-    healthy = await prov.health_check()
-    if not healthy:
-        console.print("[red]✗ Provider health check failed.[/red]")
-        return
-    console.print("[green]✓[/green] Provider connected\n")
+        session = ScanSession(cfg)
+        await session.initialize()
 
-    session = ScanSession(cfg)
-    await session.initialize()
+        console.print("[bold yellow]Phase 1: Reconnaissance[/bold yellow]\n")
+        await _run_recon(prov, session)
+        print_profile(session)
 
-    console.print("[bold yellow]Phase 1: Reconnaissance[/bold yellow]\n")
-    await _run_recon(prov, session)
-    _print_profile(session)
+        # Optionally save profile
+        if output:
+            import json
+            from pathlib import Path
+            out_path = Path(output)
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(out_path, "w") as f:
+                json.dump(session.profile.to_dict(), f, indent=2, default=str)
+            console.print(f"\n[green]✓[/green] Profile saved to: {out_path}")
 
-    # Optionally save profile
-    if output:
-        import json
-        from pathlib import Path
-        out_path = Path(output)
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(out_path, "w") as f:
-            json.dump(session.profile.to_dict(), f, indent=2, default=str)
-        console.print(f"\n[green]✓[/green] Profile saved to: {out_path}")
-
-    await session.close()
+        await session.close()

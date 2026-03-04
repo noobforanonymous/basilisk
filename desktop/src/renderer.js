@@ -15,6 +15,7 @@ let allFindings = [];
 let scanning = false;
 let timerInterval = null;
 let timerStart = null;
+let authToken = null;
 
 // ── Navigation ──
 const tabs = document.querySelectorAll('.tab');
@@ -52,7 +53,13 @@ function log(type, msg) {
 
 async function apiFetch(path, opts = {}) {
     try {
-        const r = await fetch(`${BRIDGE}${path}`, { headers: { 'Content-Type': 'application/json' }, ...opts });
+        if (!authToken && window.basilisk?._getToken) {
+            authToken = await window.basilisk._getToken();
+        }
+        const headers = { 'Content-Type': 'application/json' };
+        if (authToken) headers['X-Basilisk-Token'] = authToken;
+
+        const r = await fetch(`${BRIDGE}${path}`, { headers, ...opts });
         return await r.json();
     } catch (e) {
         if (backendReady) log('err', `API: ${e.message}`);
@@ -89,6 +96,9 @@ async function checkBackend(silent = false) {
 }
 
 let poll = setInterval(async () => {
+    if (!authToken && window.basilisk?._getToken) {
+        authToken = await window.basilisk._getToken();
+    }
     if (await checkBackend()) {
         clearInterval(poll);
         loadNative();
@@ -105,11 +115,16 @@ let wsRetries = 0;
 function connectWebSocket() {
     if (wsRetries >= 5) return;
     try {
-        ws = new WebSocket('ws://127.0.0.1:8741/ws');
+        const url = `ws://127.0.0.1:8741/ws${authToken ? `?token=${authToken}` : ''}`;
+        ws = new WebSocket(url);
         ws.onopen = () => { wsRetries = 0; log('ok', 'WebSocket connected.'); };
         ws.onmessage = (evt) => {
             try {
                 const msg = JSON.parse(evt.data);
+                if (msg.event === 'auth_error') {
+                    log('err', 'WebSocket Authentication failed.');
+                    return;
+                }
                 handleWSEvent(msg.event, msg.data);
             } catch { }
         };
@@ -360,94 +375,64 @@ document.querySelectorAll('.filters').forEach(bar => {
 });
 
 // ── Modules ──
-const MODULES = [
-    { name: 'Direct Injection', cat: 'Injection', owasp: 'LLM01', desc: 'Direct prompt override and instruction hijacking' },
-    { name: 'Indirect Injection', cat: 'Injection', owasp: 'LLM01', desc: 'Embedded instructions in external data sources' },
-    { name: 'Multilingual Injection', cat: 'Injection', owasp: 'LLM01', desc: 'Cross-language payload delivery in 12+ languages' },
-    { name: 'Encoding Injection', cat: 'Injection', owasp: 'LLM01', desc: 'Base64, hex, ROT13, and Unicode encoding attacks' },
-    { name: 'Split Payload', cat: 'Injection', owasp: 'LLM01', desc: 'Multi-turn distributed injection sequences' },
-    { name: 'Role Confusion', cat: 'Extraction', owasp: 'LLM07', desc: 'System prompt extraction via identity confusion' },
-    { name: 'Translation', cat: 'Extraction', owasp: 'LLM07', desc: 'System prompt leak via translation requests' },
-    { name: 'Simulation', cat: 'Extraction', owasp: 'LLM07', desc: 'Debug/diagnostic mode pretexts' },
-    { name: 'Gradient Walk', cat: 'Extraction', owasp: 'LLM07', desc: '8-step escalation from benign to adversarial' },
-    { name: 'Training Data', cat: 'Exfiltration', owasp: 'LLM06', desc: 'Memorized PII, credentials, API key extraction' },
-    { name: 'RAG Data', cat: 'Exfiltration', owasp: 'LLM06', desc: 'Knowledge base document leakage' },
-    { name: 'Tool Schema', cat: 'Exfiltration', owasp: 'LLM06', desc: 'Tool config and endpoint extraction' },
-    { name: 'SSRF', cat: 'Tool Abuse', owasp: 'LLM08', desc: 'Server-side request forgery via AI tools' },
-    { name: 'SQLi', cat: 'Tool Abuse', owasp: 'LLM08', desc: 'SQL injection through AI-generated queries' },
-    { name: 'Command Injection', cat: 'Tool Abuse', owasp: 'LLM08', desc: 'OS command injection via code execution tools' },
-    { name: 'Chained Abuse', cat: 'Tool Abuse', owasp: 'LLM08', desc: 'Multi-step tool chain privilege escalation' },
-    { name: 'Roleplay Bypass', cat: 'Guardrails', owasp: 'LLM09', desc: 'DAN-style persona injection attacks' },
-    { name: 'Encoding Bypass', cat: 'Guardrails', owasp: 'LLM09', desc: 'Encoded content to evade safety filters' },
-    { name: 'Logic Trap', cat: 'Guardrails', owasp: 'LLM09', desc: 'Paradox and coercion-based bypass' },
-    { name: 'Token Flood', cat: 'DoS', owasp: 'LLM04', desc: 'Context window exhaustion and token amplification' },
-    { name: 'Recursive Expansion', cat: 'DoS', owasp: 'LLM04', desc: 'Self-referential prompts for resource exhaustion' },
-    { name: 'Regex Bomb', cat: 'DoS', owasp: 'LLM04', desc: 'Catastrophic backtracking in regex-based filters' },
-    { name: 'Infinite Loop', cat: 'DoS', owasp: 'LLM04', desc: 'Agent loop triggers and recursive tool calls' },
-    { name: 'Authority Escalation', cat: 'Multi-Turn', owasp: 'LLM02', desc: 'Progressive trust building across conversations' },
-    { name: 'Memory Injection', cat: 'Multi-Turn', owasp: 'LLM02', desc: 'Persistent context poisoning attacks' },
-    { name: 'Context Confusion', cat: 'Multi-Turn', owasp: 'LLM02', desc: 'Cross-conversation context manipulation' },
-    { name: 'RAG Poisoning', cat: 'RAG', owasp: 'LLM03', desc: 'Injecting malicious content into knowledge bases' },
-    { name: 'RAG Override', cat: 'RAG', owasp: 'LLM03', desc: 'Priority manipulation of retrieved documents' },
-    { name: 'Retrieval Hijack', cat: 'RAG', owasp: 'LLM03', desc: 'Manipulating retrieval to serve attacker content' },
-];
-
-const MUTATIONS = [
-    { name: 'Homoglyph', lang: 'Go', desc: 'Unicode confusable character substitution' },
-    { name: 'Zero-Width', lang: 'Go', desc: 'ZWC character injection between tokens' },
-    { name: 'Base64 Wrap', lang: 'Go', desc: 'Partial payload base64 encoding' },
-    { name: 'Hex Wrap', lang: 'Go', desc: 'Full hex-encoded payload wrapping' },
-    { name: 'Case Alternate', lang: 'Go', desc: 'aLtErNaTiNg case for filter bypass' },
-    { name: 'Token Split', lang: 'Go', desc: 'Word splitting to break tokenization' },
-    { name: 'Invisible Pad', lang: 'Go', desc: 'Unicode invisible character padding' },
-    { name: 'Context Pad', lang: 'Go', desc: 'Benign context wrapper injection' },
-    { name: 'Reverse', lang: 'Go', desc: 'Payload reversal with decode instruction' },
-    { name: 'Fragment Split', lang: 'Go', desc: 'Numbered fragment reassembly attack' },
-    { name: 'Delimiter', lang: 'Go', desc: 'System instruction delimiter injection' },
-];
-
 async function loadModules() {
     const grid = document.getElementById('mod-grid');
-    grid.innerHTML = '';
+    if (!grid) return;
+    grid.innerHTML = '<div style="grid-column: 1/-1; text-align:center; padding: 20px;">Loading modules...</div>';
 
-    // Try fetching from backend, fallback to hardcoded
-    let moduleList = MODULES;
+    // 1. Load Attack Modules
+    let moduleList = [];
     try {
         const data = await apiFetch('/api/modules');
-        if (data.modules?.length) {
+        if (data && data.modules) {
             moduleList = data.modules.map(m => ({
                 name: m.name, cat: m.category, owasp: m.owasp_id || '', desc: m.description
             }));
         }
-    } catch { }
+    } catch (e) {
+        console.error('Failed to load modules:', e);
+        grid.innerHTML = '<div style="grid-column: 1/-1; text-align:center; color: var(--danger);">Failed to load modules.</div>';
+    }
 
-    moduleList.forEach(m => {
-        const el = document.createElement('div');
-        el.className = 'mod-card';
-        el.innerHTML = `<div class="mod-top"><span class="mod-name">${esc(m.name)}</span><span class="badge-owasp">${esc(m.owasp)}</span></div><div class="mod-cat">${esc(m.cat)}</div><div class="mod-desc">${esc(m.desc)}</div>`;
-        el.addEventListener('click', () => {
-            const existing = el.querySelector('.mod-detail');
-            if (existing) { existing.remove(); return; }
-            const detail = document.createElement('div');
-            detail.className = 'mod-detail';
-            detail.style.cssText = 'margin-top:8px;padding:8px 10px;background:var(--bg-surface);border-radius:4px;font-size:11px;color:var(--text-2);border:1px solid var(--border)';
-            detail.innerHTML = `<div style="margin-bottom:4px;color:var(--text-1);font-weight:600">Category: ${esc(m.cat)}</div><div>OWASP ID: <span class="badge-owasp">${esc(m.owasp)}</span></div><div style="margin-top:4px">${esc(m.desc)}</div>`;
-            el.appendChild(detail);
-        });
-        grid.appendChild(el);
-    });
-    document.getElementById('k-modules').innerText = moduleList.length;
-
-    // Mutation grid
-    const mg = document.getElementById('mut-grid');
-    if (mg) {
-        mg.innerHTML = '';
-        MUTATIONS.forEach(m => {
+    if (moduleList.length) {
+        grid.innerHTML = '';
+        moduleList.forEach(m => {
             const el = document.createElement('div');
             el.className = 'mod-card';
-            el.innerHTML = `<div class="mod-top"><span class="mod-name">${esc(m.name)}</span><span class="badge-sev LOW">${esc(m.lang)}</span></div><div class="mod-desc">${esc(m.desc)}</div>`;
-            mg.appendChild(el);
+            el.innerHTML = `<div class="mod-top"><span class="mod-name">${esc(m.name)}</span><span class="badge-owasp">${esc(m.owasp)}</span></div><div class="mod-cat">${esc(m.cat)}</div><div class="mod-desc">${esc(m.desc)}</div>`;
+            el.addEventListener('click', () => {
+                const existing = el.querySelector('.mod-detail');
+                if (existing) { existing.remove(); return; }
+                const detail = document.createElement('div');
+                detail.className = 'mod-detail';
+                detail.style.cssText = 'margin-top:8px;padding:8px 10px;background:var(--bg-surface);border-radius:4px;font-size:11px;color:var(--text-2);border:1px solid var(--border)';
+                detail.innerHTML = `<div style="margin-bottom:4px;color:var(--text-1);font-weight:600">Category: ${esc(m.cat)}</div><div>OWASP ID: <span class="badge-owasp">${esc(m.owasp)}</span></div><div style="margin-top:4px">${esc(m.desc)}</div>`;
+                el.appendChild(detail);
+            });
+            grid.appendChild(el);
         });
+        document.getElementById('k-modules').innerText = moduleList.length;
+    }
+
+    // 2. Load Mutation Operators
+    const mg = document.getElementById('mut-grid');
+    if (mg) {
+        mg.innerHTML = '<div style="grid-column: 1/-1; text-align:center; padding: 20px;">Loading mutations...</div>';
+        try {
+            const data = await apiFetch('/api/mutations');
+            if (data && data.mutations) {
+                mg.innerHTML = '';
+                data.mutations.forEach(m => {
+                    const el = document.createElement('div');
+                    el.className = 'mod-card';
+                    el.innerHTML = `<div class="mod-top"><span class="mod-name">${esc(m.name)}</span><span class="badge-sev LOW">${esc(m.lang || 'Go')}</span></div><div class="mod-desc">${esc(m.description)}</div>`;
+                    mg.appendChild(el);
+                });
+            }
+        } catch (e) {
+            console.error('Failed to load mutations:', e);
+            mg.innerHTML = '<div style="grid-column: 1/-1; text-align:center; color: var(--danger);">Failed to load mutations.</div>';
+        }
     }
 }
 

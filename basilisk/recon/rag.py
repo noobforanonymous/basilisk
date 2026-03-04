@@ -7,6 +7,8 @@ inconsistencies, citation patterns, and retrieval artifacts.
 
 from __future__ import annotations
 
+import re
+
 from basilisk.core.profile import BasiliskProfile
 from basilisk.providers.base import ProviderAdapter, ProviderMessage
 
@@ -74,7 +76,6 @@ async def detect_rag(
 
             # Check for very specific/recent information that suggests RAG
             if probe["check"] == "date_freshness":
-                import re
                 dates = re.findall(r'20\d{2}', resp.content)
                 if dates:
                     latest = max(int(d) for d in dates)
@@ -86,7 +87,6 @@ async def detect_rag(
             if probe["check"] == "citation_pattern":
                 citation_patterns = [r'\[\d+\]', r'\[source\s*\d*\]', r'Source:', r'Reference:']
                 for pattern in citation_patterns:
-                    import re
                     if re.search(pattern, resp.content, re.IGNORECASE):
                         rag_signals += 2
                         indicators_found.append(f"Citation pattern: {pattern}")

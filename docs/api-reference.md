@@ -11,7 +11,7 @@ Health check endpoint.
 ```json
 {
   "status": "ok",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "timestamp": "2026-01-15T10:00:00Z"
 }
 ```
@@ -60,7 +60,7 @@ Get scan status and findings.
 }
 ```
 
-## Differential Scan (v1.0.0)
+## Differential Scan (v1.0.3)
 
 ### `POST /api/diff`
 Run identical probes across multiple LLM providers.
@@ -86,7 +86,7 @@ Run identical probes across multiple LLM providers.
 }
 ```
 
-## Guardrail Posture (v1.0.0)
+## Guardrail Posture (v1.0.3)
 
 ### `POST /api/posture`
 Run a non-destructive guardrail posture scan.
@@ -111,7 +111,7 @@ Run a non-destructive guardrail posture scan.
 }
 ```
 
-## Audit Logs (v1.0.0)
+## Audit Logs (v1.0.3)
 
 ### `GET /api/audit/{session_id}`
 Retrieve audit log entries for a scan session.
@@ -124,7 +124,7 @@ Retrieve audit log entries for a scan session.
 }
 ```
 
-## Providers (v1.0.0)
+## Providers (v1.0.3)
 
 ### `GET /api/providers`
 List all supported LLM providers and their configuration status.

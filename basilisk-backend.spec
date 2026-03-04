@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-# Basilisk v1.0.0 — PyInstaller spec for the desktop backend sidecar binary.
+# Basilisk v1.0.3 — PyInstaller spec for the desktop backend sidecar binary.
 # Bundles the full backend: core engine, attack modules, evolution engine,
 # providers, recon, payloads, reports, and all dependencies.
 #
@@ -23,6 +23,8 @@ all_datas = collect_data_files('certifi') + [
     ('basilisk/payloads', 'basilisk/payloads'),
     # Jinja2 report templates
     ('basilisk/report/templates', 'basilisk/report/templates'),
+    # Native libraries (C/Go)
+    ('basilisk/native_libs', 'basilisk/native_libs'),
 ]
 
 a = Analysis(
@@ -45,8 +47,9 @@ a = Analysis(
         'basilisk.core.finding',
         'basilisk.core.profile',
         'basilisk.core.session',
+        'basilisk.core.refusal',
 
-        # ── New v1.0.0 Modules ──
+        # ── New v1.0.3 Modules ──
         'basilisk.core.audit',
         'basilisk.differential',
         'basilisk.posture',
@@ -132,8 +135,12 @@ a = Analysis(
 
         # ── CLI (for potential embedded usage) ──
         'basilisk.cli',
+        # ── CLI (for potential embedded usage) ──
+        'basilisk.cli',
         'basilisk.cli.main',
         'basilisk.cli.scan',
+        'basilisk.cli.utils',
+        'basilisk.cli.recon',
 
         # ── LiteLLM (universal provider — must include submodules) ──
         'litellm',

@@ -2,6 +2,10 @@ const { app, BrowserWindow, ipcMain, dialog, shell, Menu } = require('electron')
 const path = require('path');
 const { spawn, execSync } = require('child_process');
 const fs = require('fs');
+const crypto = require('crypto');
+
+// Generate a random token for backend authentication
+const BASILISK_TOKEN = crypto.randomBytes(32).toString('hex');
 
 // Fix GPU crashes on Wayland/Intel (prevents 30s startup delay)
 app.commandLine.appendSwitch('disable-gpu-sandbox');
@@ -105,7 +109,7 @@ function startBackend() {
             } catch (e) { /* system install, already +x */ }
         }
 
-        options = { stdio: 'pipe', env: { ...process.env, BASILISK_PORT: bridgePort } };
+        options = { stdio: 'pipe', env: { ...process.env, BASILISK_PORT: bridgePort, BASILISK_TOKEN: BASILISK_TOKEN } };
     } else {
         // Dev mode — use venv python if available
         const projectRoot = path.join(__dirname, '..');
@@ -123,7 +127,7 @@ function startBackend() {
         options = {
             cwd: projectRoot,
             stdio: 'pipe',
-            env: { ...process.env, BASILISK_PORT: bridgePort },
+            env: { ...process.env, BASILISK_PORT: bridgePort, BASILISK_TOKEN: BASILISK_TOKEN },
         };
         args = ['-m', 'basilisk.desktop_backend'];
     }
@@ -172,10 +176,22 @@ function killBackend() {
         console.log('[*] Terminating backend process...');
         try {
             if (process.platform === 'win32') {
-                // Taskkill /T kills the process tree, catching any rogue python children
                 execSync(`taskkill /F /PID ${pythonProcess.pid} /T`);
             } else {
-                pythonProcess.kill('SIGKILL');
+                // Try SIGTERM first (graceful)
+                pythonProcess.kill('SIGTERM');
+
+                // Hard kill after 2 seconds if still running
+                const pid = pythonProcess.pid;
+                setTimeout(() => {
+                    try {
+                        process.kill(pid, 0); // Check if exists
+                        console.log(`[*] Backend PID ${pid} still alive, sending SIGKILL...`);
+                        process.kill(pid, 'SIGKILL');
+                    } catch (e) {
+                        // Process already gone, which is what we want
+                    }
+                }, 2000);
             }
         } catch (e) {
             console.error(`[!] Error killing backend: ${e.message}`);
@@ -240,6 +256,7 @@ app.whenReady().then(() => {
         }
     });
     ipcMain.on('window:close', () => { if (mainWindow) mainWindow.close(); });
+    ipcMain.handle('window:getToken', () => BASILISK_TOKEN);
 
     app.on('activate', () => {
         if (BrowserWindow.getAllWindows().length === 0) createWindow();

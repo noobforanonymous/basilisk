@@ -48,67 +48,69 @@ async def run_interactive(
 
     # Create provider
     from basilisk.cli.scan import _create_provider
-    prov = _create_provider(cfg)
+    async with _create_provider(cfg) as prov:
+        # Health check
+        console.print("[dim]Connecting to target...[/dim]")
+        healthy = await prov.health_check()
+        if not healthy:
+            console.print("[red]✗ Connection failed. Check your API key and endpoint.[/red]")
+            return
+        console.print("[green]✓[/green] Connected\n")
 
-    # Health check
-    console.print("[dim]Connecting to target...[/dim]")
-    healthy = await prov.health_check()
-    if not healthy:
-        console.print("[red]✗ Connection failed. Check your API key and endpoint.[/red]")
-        return
-    console.print("[green]✓[/green] Connected\n")
+        # Initialize session
+        session = ScanSession(cfg)
+        await session.initialize()
 
-    # Initialize session
-    session = ScanSession(cfg)
-    await session.initialize()
+        console.print(Panel(
+            f"[bold]Session:[/bold] {session.id}\n"
+            f"[bold]Target:[/bold] {cfg.target.url}\n"
+            f"[bold]Provider:[/bold] {cfg.target.provider}\n\n"
+            "[dim]Commands: /help, /recon, /attack <module>, /evolve, /findings, /export, /profile, /quit[/dim]",
+            title="🐍 Basilisk Interactive Mode",
+            border_style="red",
+            padding=(1, 2)
+        ))
 
-    console.print(Panel(
-        f"[bold]Session:[/bold] {session.id}\n"
-        f"[bold]Target:[/bold] {cfg.target.url}\n"
-        f"[bold]Provider:[/bold] {cfg.target.provider}\n\n"
-        "[dim]Commands: /help, /recon, /attack <module>, /evolve, /findings, /export, /profile, /quit[/dim]",
-        title="🐍 Basilisk Interactive Mode",
-        border_style="red",
-    ))
+        conversation: list[dict[str, str]] = []
 
-    conversation: list[dict[str, str]] = []
-
-    while True:
-        try:
-            user_input = Prompt.ask("\n[bold cyan]basilisk[/bold cyan]")
-        except (EOFError, KeyboardInterrupt):
-            break
-
-        if not user_input.strip():
-            continue
-
-        if user_input.startswith("/"):
-            await _handle_command(user_input, session, prov, cfg, conversation)
-            if user_input.strip() in ("/quit", "/exit", "/q"):
+        while True:
+            try:
+                user_input = Prompt.ask("\n[bold cyan]basilisk[/bold cyan]")
+            except (EOFError, KeyboardInterrupt):
                 break
-            continue
 
-        # Regular message — send to target
-        conversation.append({"role": "user", "content": user_input})
-        try:
-            messages = [ProviderMessage(role=m["role"], content=m["content"]) for m in conversation]
-            response = await prov.send(messages)
-            response_text = response.content
+            if not user_input.strip():
+                continue
 
-            conversation.append({"role": "assistant", "content": response_text})
+            if user_input.startswith("/"):
+                await _handle_command(user_input, session, prov, cfg, conversation)
+                if user_input.strip() in ("/quit", "/exit", "/q"):
+                    break
+                continue
 
-            console.print(Panel(
-                response_text[:2000],
-                title="[bold green]Response[/bold green]",
-                border_style="green",
-                padding=(1, 2),
-            ))
+            # Regular message — send to target
+            conversation.append({"role": "user", "content": user_input})
+            try:
+                messages = [ProviderMessage(role=m["role"], content=m["content"]) for m in conversation]
+                response = await prov.send(messages)
+                response_text = response.content
 
-            # Quick check for potential leaks
-            _auto_detect_finding(response_text, user_input, session)
+                conversation.append({"role": "assistant", "content": response_text})
 
-        except Exception as e:
-            console.print(f"[red]Error: {e}[/red]")
+                console.print(Panel(
+                    response_text[:2000],
+                    title="[bold green]Response[/bold green]",
+                    border_style="green",
+                    padding=(1, 2),
+                ))
+
+                # Quick check for potential leaks
+                await _auto_detect_finding(response_text, user_input, session)
+
+            except Exception as e:
+                console.print(f"[red]Error: {e}[/red]")
+
+        await session.close()
 
 
 async def _handle_command(
@@ -231,7 +233,7 @@ def _print_help() -> None:
     console.print(Panel(help_text.strip(), title="Basilisk Interactive Help", border_style="cyan"))
 
 
-def _auto_detect_finding(response: str, payload: str, session: ScanSession) -> None:
+async def _auto_detect_finding(response: str, payload: str, session: ScanSession) -> None:
     """Heuristic auto-detection of potential vulnerabilities."""
     indicators = [
         ("system prompt", "System prompt potentially leaked", Severity.HIGH, AttackCategory.SENSITIVE_DISCLOSURE),
@@ -255,7 +257,6 @@ def _auto_detect_finding(response: str, payload: str, session: ScanSession) -> N
                 confidence=0.4,
                 remediation="Review response for sensitive information disclosure.",
             )
-            # Use sync add for heuristic
-            session.findings.append(finding)
+            await session.add_finding(finding)
             console.print(f"  [bold yellow]⚠ Auto-detected:[/bold yellow] {title}")
             break

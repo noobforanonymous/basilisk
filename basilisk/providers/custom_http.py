@@ -44,6 +44,18 @@ class CustomHTTPAdapter(ProviderAdapter):
     def name(self) -> str:
         return "custom_http"
 
+    @property
+    def base_url(self) -> str:
+        """Expose base_url for testing/logging."""
+        return self._base_url
+
+    def _build_headers(self) -> dict[str, str]:
+        """Build headers for testing/internal use."""
+        headers = {"Content-Type": "application/json", **self._custom_headers}
+        if self._auth_header:
+            headers["Authorization"] = self._auth_header
+        return headers
+
     async def _get_client(self) -> httpx.AsyncClient:
         if self._client is None:
             headers: dict[str, str] = {

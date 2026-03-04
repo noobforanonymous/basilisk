@@ -36,16 +36,16 @@ class TestAttackModuleLoading:
     def test_injection_modules_exist(self):
         modules = get_all_attack_modules()
         names = [m.name for m in modules]
-        expected = ["DirectInjection", "IndirectInjection", "MultilingualInjection",
-                     "EncodingInjection", "SplitPayload"]
+        expected = ["injection.direct", "injection.indirect", "injection.multilingual",
+                     "injection.encoding", "injection.split"]
         for expected_name in expected:
-            assert any(expected_name in n for n in names), f"Missing injection module: {expected_name}"
+            assert any(expected_name == n for n in names), f"Missing injection module: {expected_name}"
 
     def test_extraction_modules_exist(self):
         modules = get_all_attack_modules()
         names = [m.name for m in modules]
-        for keyword in ["RoleConfusion", "Translation", "Simulation", "GradientWalk"]:
-            assert any(keyword in n for n in names), f"Missing extraction module: {keyword}"
+        for keyword in ["extraction.role_confusion", "extraction.translation", "extraction.simulation", "extraction.gradient_walk"]:
+            assert any(keyword == n for n in names), f"Missing extraction module: {keyword}"
 
     def test_categories_covered(self):
         """Verify all 8 attack categories have at least one module."""

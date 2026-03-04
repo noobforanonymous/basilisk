@@ -68,7 +68,7 @@ We follow coordinated disclosure practices:
 
 ## Security Updates
 
-Security patches are released as point releases (e.g., 1.0.1, 1.0.2). We recommend always running the latest version:
+Security patches are released as point releases (e.g., 1.0.2, 1.0.3). We recommend always running the latest version:
 
 ```bash
 pip install --upgrade basilisk-ai

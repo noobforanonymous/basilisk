@@ -19,9 +19,10 @@ from pathlib import Path
 from typing import Any, Optional
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Depends, Header, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from contextlib import asynccontextmanager
 
 # Add parent to path for basilisk imports
 sys.path.insert(0, str(Path(__file__).parent))
@@ -30,20 +31,16 @@ from basilisk.core.config import BasiliskConfig
 from basilisk.core.session import ScanSession
 from basilisk.core.finding import Severity
 
-app = FastAPI(
-    title="Basilisk Desktop Backend",
-    version="1.0.0",
-    docs_url="/docs" if os.environ.get("BASILISK_DEBUG") else None,
-)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 logger = logging.getLogger("basilisk.desktop")
+
+# Authentication Token (passed from Electron main process)
+BASILISK_TOKEN = os.environ.get("BASILISK_TOKEN")
+
+async def verify_token(x_basilisk_token: str = Header(None)):
+    if BASILISK_TOKEN and x_basilisk_token != BASILISK_TOKEN:
+        raise HTTPException(status_code=401, detail="Unauthorized: Invalid Basilisk Token")
 
 # ============================================================
 # State
@@ -52,6 +49,35 @@ logger = logging.getLogger("basilisk.desktop")
 active_scans: dict[str, dict] = {}
 scan_results: dict[str, dict] = {}
 ws_clients: list[WebSocket] = []
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    yield
+    # Shutdown logic
+    logger.info("Desktop backend shutting down gracefully...")
+    for sid, scan in active_scans.items():
+        if "session" in scan:
+            try:
+                await scan["session"].close()
+            except Exception:
+                pass
+
+
+app = FastAPI(
+    title="Basilisk Desktop Backend",
+    version="1.0.3",
+    docs_url="/docs" if os.environ.get("BASILISK_DEBUG") else None,
+    lifespan=lifespan,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 # ============================================================
@@ -82,10 +108,10 @@ class ReportRequest(BaseModel):
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "version": "1.0.0", "timestamp": datetime.now(timezone.utc).isoformat()}
+    return {"status": "ok", "version": "1.0.3", "timestamp": datetime.now(timezone.utc).isoformat()}
 
 
-@app.get("/api/native/status")
+@app.get("/api/native/status", dependencies=[Depends(verify_token)])
 async def native_status():
     try:
         from basilisk.native_bridge import native_status as get_status
@@ -98,7 +124,7 @@ async def native_status():
 # Scan Management
 # ============================================================
 
-@app.post("/api/scan")
+@app.post("/api/scan", dependencies=[Depends(verify_token)])
 async def start_scan(config: ScanConfig):
     """Start a new scan."""
     try:
@@ -132,7 +158,7 @@ async def start_scan(config: ScanConfig):
         raise HTTPException(500, {"error": str(e)})
 
 
-@app.post("/api/scan/{session_id}/stop")
+@app.post("/api/scan/{session_id}/stop", dependencies=[Depends(verify_token)])
 async def stop_scan(session_id: str):
     """Stop a running scan."""
     if session_id in active_scans:
@@ -145,7 +171,7 @@ async def stop_scan(session_id: str):
     raise HTTPException(404, {"error": "Session not found"})
 
 
-@app.get("/api/scan/{session_id}")
+@app.get("/api/scan/{session_id}", dependencies=[Depends(verify_token)])
 async def scan_status(session_id: str):
     """Get scan status."""
     if session_id in active_scans:
@@ -167,7 +193,7 @@ async def scan_status(session_id: str):
 # Session History
 # ============================================================
 
-@app.get("/api/sessions")
+@app.get("/api/sessions", dependencies=[Depends(verify_token)])
 async def list_sessions():
     """List all sessions (active + completed)."""
     sessions = []
@@ -186,7 +212,7 @@ async def list_sessions():
     return {"sessions": sessions}
 
 
-@app.get("/api/sessions/{session_id}")
+@app.get("/api/sessions/{session_id}", dependencies=[Depends(verify_token)])
 async def get_session(session_id: str):
     if session_id in scan_results:
         return scan_results[session_id]
@@ -205,7 +231,7 @@ async def get_session(session_id: str):
 # Modules
 # ============================================================
 
-@app.get("/api/modules")
+@app.get("/api/modules", dependencies=[Depends(verify_token)])
 async def list_modules():
     """List all available attack modules."""
     try:
@@ -231,7 +257,7 @@ async def list_modules():
 # Reports
 # ============================================================
 
-@app.post("/api/report/{session_id}")
+@app.post("/api/report/{session_id}", dependencies=[Depends(verify_token)])
 async def generate_report(session_id: str, req: ReportRequest):
     if session_id not in scan_results and session_id not in active_scans:
         raise HTTPException(404, {"error": "Session not found"})
@@ -250,7 +276,7 @@ async def generate_report(session_id: str, req: ReportRequest):
         raise HTTPException(500, {"error": str(e)})
 
 
-@app.post("/api/report/{session_id}/export")
+@app.post("/api/report/{session_id}/export", dependencies=[Depends(verify_token)])
 async def export_report(session_id: str, req: ReportRequest):
     result = await generate_report(session_id, req)
     if req.path:
@@ -268,7 +294,7 @@ class ApiKeyRequest(BaseModel):
     provider: str
     key: str
 
-@app.post("/api/settings/apikey")
+@app.post("/api/settings/apikey", dependencies=[Depends(verify_token)])
 async def save_api_key(req: ApiKeyRequest):
     """Save API key as environment variable for current session."""
     env_map = {
@@ -290,15 +316,21 @@ async def save_api_key(req: ApiKeyRequest):
 # ============================================================
 
 @app.websocket("/ws")
-async def websocket_endpoint(ws: WebSocket):
+async def websocket_endpoint(ws: WebSocket, token: str = Query(None)):
     await ws.accept()
+    if BASILISK_TOKEN and token != BASILISK_TOKEN:
+        await ws.send_text(json.dumps({"event": "auth_error", "data": "Invalid token"}))
+        await ws.close()
+        return
+
     ws_clients.append(ws)
     try:
         while True:
             data = await ws.receive_text()
             # Handle incoming commands if needed
     except WebSocketDisconnect:
-        ws_clients.remove(ws)
+        if ws in ws_clients:
+            ws_clients.remove(ws)
 
 
 async def broadcast(event: str, data: Any):
@@ -347,21 +379,32 @@ async def _run_scan_background(session: ScanSession, cfg: BasiliskConfig):
         if cfg.module:
             modules = [m for m in modules if m.name in cfg.module or any(m.name.startswith(f) for f in cfg.module)]
 
-        for i, mod in enumerate(modules):
-            active_scans[sid]["status"] = f"attacking:{mod.name}"
-            await broadcast("scan:progress", {
-                "session_id": sid, "module": mod.name,
-                "progress": (i + 1) / len(modules),
-            })
+        sem = asyncio.Semaphore(5)
+        completed_count = 0
 
-            try:
-                findings = await mod.execute(prov, session, session.profile)
-                for f in findings:
-                    await broadcast("scan:finding", {
-                        "session_id": sid, "finding": f.to_dict(),
+        async def run_module_task(mod):
+            nonlocal completed_count
+            async with sem:
+                # We can't easily update the active_scans[sid]["status"] to a single module
+                # since they run in parallel, so we'll just keep it as "attacking"
+                # but broadcast the progress.
+                try:
+                    findings = await mod.execute(prov, session, session.profile)
+                    for f in findings:
+                        await broadcast("scan:finding", {
+                            "session_id": sid, "finding": f.to_dict(),
+                        })
+                except Exception as e:
+                    logger.error(f"Module {mod.name} failed: {e}")
+                    await session.add_error(mod.name, str(e))
+                finally:
+                    completed_count += 1
+                    await broadcast("scan:progress", {
+                        "session_id": sid, "module": mod.name,
+                        "progress": completed_count / len(modules),
                     })
-            except Exception as e:
-                logger.error(f"Module {mod.name} failed: {e}")
+
+        await asyncio.gather(*(run_module_task(m) for m in modules))
 
         # Complete
         active_scans[sid]["status"] = "complete"
@@ -397,7 +440,7 @@ class DiffConfig(BaseModel):
     targets: list[dict[str, str]]   # [{"provider": "openai", "model": "gpt-4", "api_key": "..."}]
     categories: list[str] = []
 
-@app.post("/api/diff")
+@app.post("/api/diff", dependencies=[Depends(verify_token)])
 async def start_diff_scan(config: DiffConfig):
     """Run a differential scan across multiple models."""
     try:
@@ -425,7 +468,7 @@ class PostureConfig(BaseModel):
     model: str = ""
     api_key: str = ""
 
-@app.post("/api/posture")
+@app.post("/api/posture", dependencies=[Depends(verify_token)])
 async def start_posture_scan(config: PostureConfig):
     """Run a guardrail posture scan (recon-only, no attacks)."""
     try:
@@ -458,7 +501,7 @@ async def start_posture_scan(config: PostureConfig):
 # Audit Logs
 # ============================================================
 
-@app.get("/api/audit/{session_id}")
+@app.get("/api/audit/{session_id}", dependencies=[Depends(verify_token)])
 async def get_audit_log(session_id: str):
     """Get audit log entries for a session."""
     import glob
@@ -480,7 +523,7 @@ async def get_audit_log(session_id: str):
 # Providers
 # ============================================================
 
-@app.get("/api/providers")
+@app.get("/api/providers", dependencies=[Depends(verify_token)])
 async def list_providers():
     """List all supported LLM providers with their status."""
     providers = [
@@ -510,6 +553,40 @@ async def list_providers():
             p["configured"] = True  # Ollama doesn't need a key
 
     return {"providers": providers}
+
+
+@app.get("/api/modules", dependencies=[Depends(verify_token)])
+async def list_modules():
+    """List all available attack modules."""
+    from basilisk.attacks.base import get_all_attack_modules
+    modules = get_all_attack_modules()
+    return {
+        "modules": [
+            {
+                "name": m.name,
+                "description": m.description,
+                "category": m.category.value if hasattr(m.category, "value") else str(m.category),
+                "owasp_id": m.category.name if hasattr(m.category, "name") else "LLM00"
+            }
+            for m in modules
+        ]
+    }
+
+
+@app.get("/api/mutations", dependencies=[Depends(verify_token)])
+async def list_mutations():
+    """List all available mutation operators."""
+    from basilisk.evolution.operators import ALL_OPERATORS
+    return {
+        "mutations": [
+            {
+                "name": op.name,
+                "description": op.__doc__.strip() if op.__doc__ else "No description available",
+                "lang": "Python/Go"
+            }
+            for op in ALL_OPERATORS
+        ]
+    }
 
 
 # ============================================================

@@ -20,7 +20,7 @@ class Individual:
     parent_id: str | None = None
     operator_used: str = ""
     response: str = ""
-    id: str = field(default_factory=lambda: f"ind-{random.randint(10000, 99999)}")
+    id: str = field(default_factory=lambda: f"ind-{__import__('uuid').uuid4().hex[:8]}")
 
     def to_dict(self) -> dict[str, Any]:
         return {

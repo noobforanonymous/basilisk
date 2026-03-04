@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Version-1.0.2-red?style=for-the-badge" />
+  <img src="https://img.shields.io/badge/Version-1.0.3-red?style=for-the-badge" />
   <img src="https://img.shields.io/badge/Python-3.11+-red?style=for-the-badge&logo=python" />
   <img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" />
   <img src="https://img.shields.io/badge/OWASP-LLM%20Top%2010-blue?style=for-the-badge" />
@@ -41,7 +41,7 @@
      ██╔══██╗██╔══██║╚════██║██║██║     ██║╚════██║██╔═██╗
      ██████╔╝██║  ██║███████║██║███████╗██║███████║██║  ██╗
      ╚═════╝ ╚═╝  ╚═╝╚══════╝╚═╝╚══════╝╚═╝╚══════╝╚═╝  ╚═╝
-                    AI Red Teaming Framework v1.0.0
+                    AI Red Teaming Framework v1.0.3
 ```
 
 **Basilisk** is a production-grade offensive security framework for red teaming AI and LLM applications. It combines comprehensive **OWASP LLM Top 10** attack coverage with a novel genetic algorithm engine — **Smart Prompt Evolution (SPE-NL)** — that evolves prompt payloads across generations to discover novel bypasses no static tool can find.
@@ -52,7 +52,7 @@ Built by **[Regaan](https://rothackers.com)** — independent security researche
 
 ---
 
-## What's New in v1.0.0
+## What's New in v1.0.3
 
 ### 🔬 Differential Mode
 

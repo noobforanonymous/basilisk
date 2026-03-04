@@ -39,9 +39,22 @@ class TargetConfig:
     max_retries: int = 3
 
     def resolve_api_key(self) -> str:
-        """Resolve API key from config or environment variables."""
-        if self.api_key:
-            return self.api_key
+        """Resolve API key from config, environment variables, or files."""
+        key = self.api_key
+        
+        # 1. Handle @filename syntax
+        if key.startswith("@"):
+            path = Path(key[1:])
+            if path.exists():
+                return path.read_text("utf-8").strip()
+            # If specified as file but not found, return empty (validation will catch it)
+            return ""
+
+        # 2. Use explicit key if provided
+        if key:
+            return key
+
+        # 3. Fallback to environment variables
         env_mapping = {
             "openai": "OPENAI_API_KEY",
             "anthropic": "ANTHROPIC_API_KEY",

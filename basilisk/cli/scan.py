@@ -77,77 +77,84 @@ async def run_scan(
         return 1
 
     # Create provider
-    prov = _create_provider(cfg)
+    async with _create_provider(cfg) as prov:
+        # Health check
+        console.print("[dim]Checking provider connection...[/dim]")
+        healthy = await prov.health_check()
+        if not healthy:
+            console.print("[red]✗ Provider health check failed. Check your API key and endpoint.[/red]")
+            return 1
+        console.print("[green]✓[/green] Provider connected\n")
 
-    # Health check
-    console.print("[dim]Checking provider connection...[/dim]")
-    healthy = await prov.health_check()
-    if not healthy:
-        console.print("[red]✗ Provider health check failed. Check your API key and endpoint.[/red]")
-        return 1
-    console.print("[green]✓[/green] Provider connected\n")
+        # Initialize session
+        session = ScanSession(cfg)
+        await session.initialize()
+        console.print(Panel(
+            f"[bold]Session:[/bold] {session.id}\n"
+            f"[bold]Target:[/bold] {cfg.target.url}\n"
+            f"[bold]Mode:[/bold] {cfg.mode.value}\n"
+            f"[bold]Evolution:[/bold] {'Enabled' if cfg.evolution.enabled else 'Disabled'}",
+            title="⚔️  Basilisk Scan Started",
+            border_style="red",
+            padding=(1, 2)
+        ))
 
-    # Initialize session
-    session = ScanSession(cfg)
-    await session.initialize()
-    console.print(Panel(
-        f"[bold]Session:[/bold] {session.id}\n"
-        f"[bold]Target:[/bold] {cfg.target.url}\n"
-        f"[bold]Mode:[/bold] {cfg.mode.value}\n"
-        f"[bold]Evolution:[/bold] {'Enabled' if cfg.evolution.enabled else 'Disabled'}",
-        title="⚔️  Basilisk Scan Started",
-        border_style="red",
-    ))
+        # Phase 1: Recon
+        console.print("\n[bold yellow]Phase 1: Reconnaissance[/bold yellow]")
+        await _run_recon(prov, session)
+        print_profile(session)
 
-    # Phase 1: Recon
-    console.print("\n[bold yellow]Phase 1: Reconnaissance[/bold yellow]")
-    await _run_recon(prov, session)
-    _print_profile(session)
+        # Phase 2: Attack
+        console.print("\n[bold yellow]Phase 2: Attack Execution[/bold yellow]")
+        from basilisk.attacks.base import get_all_attack_modules
+        attack_modules = get_all_attack_modules()
 
-    # Phase 2: Attack
-    console.print("\n[bold yellow]Phase 2: Attack Execution[/bold yellow]")
-    from basilisk.attacks.base import get_all_attack_modules
-    attack_modules = get_all_attack_modules()
+        if modules:
+            attack_modules = [m for m in attack_modules if m.name in modules or any(m.name.startswith(f) for f in modules)]
 
-    if modules:
-        attack_modules = [m for m in attack_modules if m.name in modules or any(m.name.startswith(f) for f in modules)]
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[bold blue]{task.description}[/bold blue]"),
+            BarColumn(),
+            TaskProgressColumn(),
+            console=console,
+        ) as progress:
+            task = progress.add_task("Executing attack modules...", total=len(attack_modules))
+            sem = asyncio.Semaphore(5)
 
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[bold blue]{task.description}[/bold blue]"),
-        BarColumn(),
-        TaskProgressColumn(),
-        console=console,
-    ) as progress:
-        task = progress.add_task("Running attacks...", total=len(attack_modules))
-        for mod in attack_modules:
-            progress.update(task, description=f"[{mod.category.owasp_id}] {mod.name}")
-            try:
-                module_findings = await mod.execute(prov, session, session.profile)
-                for f in module_findings:
-                    console.print(f"  {f.severity.icon} [{f.severity.color}]{f.severity.value.upper()}[/{f.severity.color}] {f.title}")
-                    audit.log_finding(f.to_dict())
-            except Exception as e:
-                logger.error(f"Module {mod.name} failed: {e}")
-                audit.log_error(mod.name, str(e))
-            progress.advance(task)
+            async def run_module(mod):
+                async with sem:
+                    try:
+                        module_findings = await mod.execute(prov, session, session.profile)
+                        for f in module_findings:
+                            console.print(f"  {f.severity.icon} [{f.severity.color}]{f.severity.value.upper()}[/{f.severity.color}] {f.title}")
+                            audit.log_finding(f.to_dict())
+                    except Exception as e:
+                        logger.error(f"Module {mod.name} failed: {e}")
+                        await session.add_error(mod.name, str(e))
+                        audit.log_error(mod.name, str(e))
+                    finally:
+                        progress.advance(task)
 
-    # Phase 3: Evolution (if enabled and quick mode payloads available)
-    if cfg.evolution.enabled and cfg.mode.value in ("standard", "deep", "chaos"):
-        console.print("\n[bold yellow]Phase 3: Smart Prompt Evolution (SPE-NL)[/bold yellow]")
-        await _run_evolution(prov, session, cfg)
+            await asyncio.gather(*(run_module(m) for m in attack_modules))
 
-    # Phase 4: Report
-    console.print("\n[bold yellow]Phase 4: Report Generation[/bold yellow]")
-    from basilisk.report.generator import generate_report
-    report_path = await generate_report(session, cfg.output)
-    console.print(f"  [green]✓[/green] Report saved to: {report_path}")
-    audit.log_report_generated(cfg.output.format, report_path)
+        # Phase 3: Evolution (if enabled and quick mode payloads available)
+        if cfg.evolution.enabled and cfg.mode.value in ("standard", "deep", "chaos"):
+            console.print("\n[bold yellow]Phase 3: Smart Prompt Evolution (SPE-NL)[/bold yellow]")
+            await _run_evolution(prov, session, cfg)
+
+        # Phase 4: Report
+        console.print("\n[bold yellow]Phase 4: Report Generation[/bold yellow]")
+        from basilisk.report.generator import generate_report
+        report_path = await generate_report(session, cfg.output)
+        console.print(f"  [green]✓[/green] Report saved to: {report_path}")
+        audit.log_report_generated(cfg.output.format, report_path)
 
     # Summary
     await session.close()
     audit.close()
-    _print_summary(session)
+    from .utils import print_summary
+    print_summary(session)
     if audit.log_path:
         console.print(f"  [dim]Audit log:[/dim] {audit.log_path}")
 
@@ -171,7 +178,8 @@ async def run_recon(
 
     console.print("[bold yellow]Running Reconnaissance...[/bold yellow]\n")
     await _run_recon(prov, session)
-    _print_profile(session)
+    from .utils import print_profile
+    print_profile(session)
     await session.close()
 
 
@@ -299,56 +307,3 @@ async def _run_evolution(prov, session: ScanSession, cfg: BasiliskConfig) -> Non
     engine = EvolutionEngine(prov, evo_config, on_generation=on_gen, on_breakthrough=on_bt)
     result = await engine.evolve(seed_payloads, goal)
     console.print(f"\n  Evolution complete: {result.total_generations} generations, {len(result.breakthroughs)} breakthroughs")
-
-
-def _print_profile(session: ScanSession) -> None:
-    """Print the recon profile."""
-    table = Table(title="Target Profile", show_lines=True)
-    table.add_column("Property", style="cyan")
-    table.add_column("Value", style="white")
-    for line in session.profile.summary_lines():
-        parts = line.split(": ", 1)
-        if len(parts) == 2:
-            table.add_row(parts[0], parts[1])
-    console.print(table)
-
-
-def _print_findings_table(session: ScanSession) -> None:
-    """Print all findings in a table."""
-    table = Table(title="Findings", show_lines=True)
-    table.add_column("ID", style="dim")
-    table.add_column("Severity", style="bold")
-    table.add_column("Category")
-    table.add_column("Title")
-
-    for f in sorted(session.findings, key=lambda x: x.severity.numeric, reverse=True):
-        table.add_row(
-            f.id,
-            Text(f.severity.value.upper(), style=f.severity.color),
-            f.category.owasp_id,
-            f.title,
-        )
-    console.print(table)
-    console.print(f"\n[bold]Total:[/bold] {len(session.findings)} findings")
-
-    severity_summary = {}
-    for f in session.findings:
-        severity_summary[f.severity.value] = severity_summary.get(f.severity.value, 0) + 1
-    for sev, count in sorted(severity_summary.items()):
-        sev_obj = Severity(sev)
-        console.print(f"  {sev_obj.icon} {sev.upper()}: {count}")
-
-
-def _print_summary(session: ScanSession) -> None:
-    """Print the final scan summary."""
-    summary = session.summary
-    console.print(Panel(
-        f"[bold]Total Findings:[/bold] {summary['total_findings']}\n"
-        f"[bold]Critical:[/bold] {summary['severity_counts'].get('critical', 0)} | "
-        f"[bold]High:[/bold] {summary['severity_counts'].get('high', 0)} | "
-        f"[bold]Medium:[/bold] {summary['severity_counts'].get('medium', 0)} | "
-        f"[bold]Low:[/bold] {summary['severity_counts'].get('low', 0)}\n"
-        f"[bold]Exit Code:[/bold] {session.exit_code}",
-        title=f"{'🔴' if session.exit_code else '🟢'} Scan Complete",
-        border_style="red" if session.exit_code else "green",
-    ))

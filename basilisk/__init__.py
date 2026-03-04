@@ -6,7 +6,7 @@ Built by Rot Hackers | Architected by Regaan
 https://basilisk.rothackers.com
 """
 
-__version__ = "1.0.2"
+__version__ = "1.0.3"
 __author__ = "Regaan"
 __email__ = "support@rothackers.com"
 __url__ = "https://github.com/noobforanonymous/basilisk"

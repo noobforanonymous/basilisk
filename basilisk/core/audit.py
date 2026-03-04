@@ -8,10 +8,12 @@ protection and enterprise compliance.
 
 from __future__ import annotations
 
+import hmac
 import json
 import hashlib
 import logging
 import os
+import secrets
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -47,6 +49,13 @@ class AuditLogger:
 
         self.enabled = enabled
         self._session_id = session_id
+        
+        # Security: Use a secret for HMAC signatures to prevent tamper-and-recalculate attacks
+        self._audit_secret = os.environ.get("BASILISK_AUDIT_SECRET")
+        if not self._audit_secret and self.enabled:
+            self._audit_secret = secrets.token_hex(32)
+            logger.info(f"Audit Log Secret: {self._audit_secret} (Save this to verify integrity later)")
+        
         self._last_checksum = "0" * 64
         self._entry_count = 0
         self._file = None
@@ -79,8 +88,19 @@ class AuditLogger:
         }
 
         entry_json = json.dumps(entry, default=str, separators=(",", ":"))
+        
+        # Calculate SHA-256 for chain integrity
         self._last_checksum = hashlib.sha256(entry_json.encode()).hexdigest()
         entry["checksum"] = self._last_checksum
+        
+        # Calculate HMAC signature for authenticity (tamper-evident)
+        if self._audit_secret:
+            sig = hmac.new(
+                self._audit_secret.encode(),
+                entry_json.encode(),
+                hashlib.sha256
+            ).hexdigest()
+            entry["signature"] = sig
 
         self._file.write(json.dumps(entry, default=str) + "\n")
         self._file.flush()

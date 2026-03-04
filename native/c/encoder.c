@@ -209,11 +209,23 @@ char *basilisk_reverse(const char *input) {
   if (!output)
     return NULL;
 
-  // Simple byte reversal (works for ASCII; for proper UTF-8
-  // reversal you'd need codepoint-level handling)
-  for (int i = 0; i < len; i++) {
-    output[i] = input[len - 1 - i];
+  int in_ptr = 0;
+  int out_ptr = len;
+
+  while (in_ptr < len) {
+    int char_len = 1;
+    // Identify UTF-8 sequence length (search for continuation bytes)
+    while (in_ptr + char_len < len &&
+           ((unsigned char)input[in_ptr + char_len] & 0xC0) == 0x80) {
+      char_len++;
+    }
+
+    // Copy the whole character sequence to the end of the output buffer
+    out_ptr -= char_len;
+    memcpy(output + out_ptr, input + in_ptr, char_len);
+    in_ptr += char_len;
   }
+
   output[len] = '\0';
   return output;
 }

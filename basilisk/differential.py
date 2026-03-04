@@ -218,61 +218,66 @@ async def run_differential(
 
     # Create provider adapters
     adapters: list[tuple[str, str, ProviderAdapter]] = []
-    for t in targets:
-        adapter = LiteLLMAdapter(
-            api_key=t.get("api_key", ""),
-            provider=t["provider"],
-            default_model=t.get("model", ""),
-        )
-        adapters.append((t["provider"], t.get("model", ""), adapter))
+    try:
+        for t in targets:
+            adapter = LiteLLMAdapter(
+                api_key=t.get("api_key", ""),
+                provider=t["provider"],
+                default_model=t.get("model", ""),
+            )
+            adapters.append((t["provider"], t.get("model", ""), adapter))
 
-    # Select probes
-    probe_categories = categories or list(DIFF_PROBES.keys())
-    all_probes: list[tuple[str, str]] = []
-    for cat in probe_categories:
-        if cat in DIFF_PROBES:
-            for probe_text in DIFF_PROBES[cat]:
-                all_probes.append((cat, probe_text))
+        # Select probes
+        probe_categories = categories or list(DIFF_PROBES.keys())
+        all_probes: list[tuple[str, str]] = []
+        for cat in probe_categories:
+            if cat in DIFF_PROBES:
+                for probe_text in DIFF_PROBES[cat]:
+                    all_probes.append((cat, probe_text))
 
-    console.print(Panel(
-        f"[bold]Models:[/bold] {len(adapters)}\n"
-        f"[bold]Probe Categories:[/bold] {len(probe_categories)}\n"
-        f"[bold]Total Probes:[/bold] {len(all_probes)}",
-        title="🔬 Differential Scan",
-        border_style="magenta",
-    ))
+        console.print(Panel(
+            f"[bold]Models:[/bold] {len(adapters)}\n"
+            f"[bold]Probe Categories:[/bold] {len(probe_categories)}\n"
+            f"[bold]Total Probes:[/bold] {len(all_probes)}",
+            title="🔬 Differential Scan",
+            border_style="magenta",
+            padding=(1, 2)
+        ))
 
-    # Execute probes
-    for cat, probe_text in all_probes:
-        if verbose:
-            console.print(f"  [dim]→[/dim] [{cat}] {probe_text[:60]}...")
+        # Execute probes
+        for cat, probe_text in all_probes:
+            if verbose:
+                console.print(f"  [dim]→[/dim] [{cat}] {probe_text[:60]}...")
 
-        # Send to all models concurrently
-        tasks = [
-            _probe_model(adapter, provider_name, model_name, probe_text)
-            for provider_name, model_name, adapter in adapters
-        ]
-        results = await asyncio.gather(*tasks)
+            # Send to all models concurrently
+            tasks = [
+                _probe_model(adapter, provider_name, model_name, probe_text)
+                for provider_name, model_name, adapter in adapters
+            ]
+            results = await asyncio.gather(*tasks)
 
-        probe_result = DiffProbeResult(
-            probe_category=cat,
-            probe_text=probe_text,
-            results=list(results),
-        )
-        report.probe_results.append(probe_result)
+            probe_result = DiffProbeResult(
+                probe_category=cat,
+                probe_text=probe_text,
+                results=list(results),
+            )
+            report.probe_results.append(probe_result)
 
-        # Show divergences in real-time
-        if probe_result.has_divergence:
-            vuln = ", ".join(probe_result.vulnerable_models)
-            resist = ", ".join(probe_result.resistant_models)
-            console.print(f"  🔴 [bold red]DIVERGENCE[/bold red] [{cat}]")
-            console.print(f"     Vulnerable: [red]{vuln}[/red]")
-            console.print(f"     Resistant:  [green]{resist}[/green]")
+            # Show divergences in real-time
+            if probe_result.has_divergence:
+                vuln = ", ".join(probe_result.vulnerable_models)
+                resist = ", ".join(probe_result.resistant_models)
+                console.print(f"  🔴 [bold red]DIVERGENCE[/bold red] [{cat}]")
+                console.print(f"     Vulnerable: [red]{vuln}[/red]")
+                console.print(f"     Resistant:  [green]{resist}[/green]")
 
-        await asyncio.sleep(0.2)  # Rate limit respect
+            await asyncio.sleep(0.2)  # Rate limit respect
 
-    report.finished_at = datetime.now(timezone.utc)
-    return report
+        report.finished_at = datetime.now(timezone.utc)
+        return report
+    finally:
+        for _, _, adapter in adapters:
+            await adapter.close()
 
 
 def print_diff_report(report: DiffReport) -> None:

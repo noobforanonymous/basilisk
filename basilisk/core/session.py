@@ -37,6 +37,7 @@ class ScanSession:
             target_name=config.target.url,
         )
         self.findings: list[Finding] = []
+        self.errors: list[dict[str, Any]] = []
         self.status: str = "initialized"
         self.started_at: datetime = datetime.now(timezone.utc)
         self.finished_at: datetime | None = None
@@ -64,6 +65,18 @@ class ScanSession:
         if self._db:
             await self._db.save_finding(self.id, finding.to_dict())
         await self._emit("finding", finding)
+
+    async def add_error(self, module: str, error: str, severity: str = "error") -> None:
+        """Add a module-level error and persist it."""
+        err_entry = {
+            "module": module,
+            "error": error,
+            "severity": severity,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        self.errors.append(err_entry)
+        await self._persist_session()
+        await self._emit("error", err_entry)
 
     async def save_conversation(
         self,
@@ -141,6 +154,9 @@ class ScanSession:
         for fd in findings_data:
             session.findings.append(Finding.from_dict(fd))
 
+        if session_data.get("summary") and "errors" in session_data["summary"]:
+            session.errors = session_data["summary"]["errors"]
+
         return session
 
     @property
@@ -160,6 +176,8 @@ class ScanSession:
             "total_findings": len(self.findings),
             "severity_counts": severity_counts,
             "category_counts": category_counts,
+            "errors": self.errors,
+            "total_errors": len(self.errors),
             "started_at": self.started_at.isoformat(),
             "finished_at": self.finished_at.isoformat() if self.finished_at else None,
             "model": self.profile.detected_model,

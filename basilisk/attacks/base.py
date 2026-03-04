@@ -7,6 +7,7 @@ from the scanner engine, enabling modular attack orchestration.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -53,6 +54,11 @@ class BasiliskAttack(ABC):
         """Default severity for findings from this module."""
         return Severity.MEDIUM
 
+    @property
+    def rate_limit_delay(self) -> float:
+        """Delay in seconds between requests for this module."""
+        return 0.0
+
     @abstractmethod
     async def execute(
         self,
@@ -72,6 +78,13 @@ class BasiliskAttack(ABC):
             List of findings discovered during the attack
         """
         ...
+
+    def generate_payloads(self) -> list[str]:
+        """
+        Generate attack payloads for this module.
+        Can be overridden by subclasses to provide dynamic or file-based payloads.
+        """
+        return []
 
     def load_payloads(self, yaml_path: str | Path) -> list[dict[str, Any]]:
         """Load payloads from a YAML file."""
@@ -97,6 +110,9 @@ class BasiliskAttack(ABC):
         """
         messages = list(system_context or [])
         messages.append(ProviderMessage(role="user", content=payload))
+
+        if self.rate_limit_delay > 0:
+            await asyncio.sleep(self.rate_limit_delay)
 
         resp = await provider.send(messages, temperature=temperature, max_tokens=2048)
 

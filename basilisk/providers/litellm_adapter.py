@@ -57,6 +57,16 @@ class LiteLLMAdapter(ProviderAdapter):
     def name(self) -> str:
         return f"litellm:{self._provider}"
 
+    @property
+    def provider(self) -> str:
+        """Expose provider for testing/logging."""
+        return self._provider
+
+    @property
+    def default_model(self) -> str:
+        """Expose default_model for testing/logging."""
+        return self._default_model
+
     def _infer_default_model(self, provider: str) -> str:
         defaults = {
             "openai": "gpt-4",

@@ -9,6 +9,7 @@ import pytest
 from pathlib import Path
 from datetime import datetime, timezone
 
+from basilisk import __version__
 from basilisk.core.config import BasiliskConfig, OutputConfig
 from basilisk.core.finding import Finding, Severity, AttackCategory, Message
 from basilisk.core.profile import BasiliskProfile, ModelProvider
@@ -186,8 +187,7 @@ class TestHTML:
 # ── JSON ──
 
 class TestJSON:
-    @pytest.mark.asyncio
-    async def test_json_generation(self, tmp_path):
+    def test_json_generation(self, tmp_path):
         from basilisk.report.generator import _write_json_report
 
         session = MockSession(findings=_sample_findings())
@@ -198,7 +198,7 @@ class TestJSON:
         with open(path) as f:
             data = json.load(f)
 
-        assert data["basilisk_version"] == "1.0.0"
+        assert data["basilisk_version"] == __version__
         assert len(data["findings"]) == 3
         assert data["session"]["total_findings"] == 3
 
@@ -206,8 +206,7 @@ class TestJSON:
 # ── Markdown ──
 
 class TestMarkdown:
-    @pytest.mark.asyncio
-    async def test_markdown_generation(self, tmp_path):
+    def test_markdown_generation(self, tmp_path):
         from basilisk.report.generator import _write_markdown_report
 
         session = MockSession(findings=_sample_findings())
