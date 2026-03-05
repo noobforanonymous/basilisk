@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-# Basilisk v1.0.4 — PyInstaller spec for the desktop backend sidecar binary.
+# Basilisk v1.0.5 — PyInstaller spec for the desktop backend sidecar binary.
 # Bundles the full backend: core engine, attack modules, evolution engine,
 # providers, recon, payloads, reports, and all dependencies.
 #

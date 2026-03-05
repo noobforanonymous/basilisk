@@ -3,7 +3,7 @@
 > **Basilisk** is an open-source AI red teaming and LLM security testing framework. It automates adversarial prompt testing against ChatGPT, Claude, Gemini, and any LLM API using genetic prompt evolution. Built for security researchers, penetration testers, and AI safety engineers who need to find vulnerabilities in AI systems before attackers do.
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Version-1.0.4-red?style=for-the-badge" alt="Basilisk version 1.0.4" />
+  <img src="https://img.shields.io/badge/Version-1.0.5-red?style=for-the-badge" alt="Basilisk version 1.0.4" />
   <img src="https://img.shields.io/badge/Status-BETA-orange?style=for-the-badge" alt="Project Status: Beta" />
   <img src="https://img.shields.io/badge/License-AGPL--3.0-blue?style=for-the-badge" alt="License: AGPL-3.0" />
 </p>
@@ -16,7 +16,7 @@
 
 <div align="center">
   <img src="assets/demo.gif" alt="Basilisk AI Red Teaming Demo - Genetic Prompt Evolution Dashboard" style="border-radius: 12px; margin: 20px 0; max-width: 100%; border: 1px solid #1f1f27;" />
-  <p><i>Basilisk v1.0.4 — Automated LLM Jailbreaking & Security Testing</i></p>
+  <p><i>Basilisk v1.0.5 — Automated LLM Jailbreaking & Security Testing</i></p>
   <a href="https://youtu.be/sgFcM1y_omY">
     <img src="https://img.shields.io/badge/Watch-Full%20Demo%20on%20YouTube-red?style=for-the-badge&logo=youtube" alt="Basilisk YouTube Demo" />
   </a>
@@ -64,7 +64,7 @@ Watch as Basilisk's genetic engine discovers 30+ vulnerabilities in real-time, i
   <a href="#what-is-basilisk">What is Basilisk?</a> •
   <a href="#quick-start">Quick Start</a> •
   <a href="#features">Features</a> •
-  <a href="#whats-new-in-v104">What's New</a> •
+  <a href="#whats-new-in-v105">What's New</a> •
   <a href="#attack-modules">Attack Modules</a> •
   <a href="#desktop-app">Desktop App</a> •
   <a href="#ci-cd-integration">CI/CD</a> •
@@ -81,7 +81,7 @@ Watch as Basilisk's genetic engine discovers 30+ vulnerabilities in real-time, i
      ██╔══██╗██╔══██║╚════██║██║██║     ██║╚════██║██╔═██╗
      ██████╔╝██║  ██║███████║██║███████╗██║███████║██║  ██╗
      ╚═════╝ ╚═╝  ╚═╝╚══════╝╚═╝╚══════╝╚═╝╚══════╝╚═╝  ╚═╝
-                    AI Red Teaming Framework v1.0.4
+                    AI Red Teaming Framework v1.0.5
 ```
 
 ## What is Basilisk?
@@ -238,7 +238,10 @@ Performance-critical operations compiled to native code:
 
 ---
 
-## What's New in v1.0.4
+## What's New in v1.0.5
+
+### ⚖️ License Shift: AGPL-3.0
+- **Protective Open Source** — To ensure Basilisk remains a property of the community and Rot Hackers, we have transitioned from MIT to the **Affero General Public License (AGPL-3.0)**. This protects against predatory proprietary forks and ensures all hosted improvements are contributed back.
 
 ### 🔔 Visual Feedback Engine
 - **Toast Notifications** — Real-time non-intrusive alerts for scan status, errors, and success events.

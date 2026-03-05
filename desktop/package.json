@@ -1,6 +1,6 @@
 {
     "name": "basilisk-desktop",
-    "version": "1.0.4",
+    "version": "1.0.5",
     "description": "Basilisk — AI Red Teaming Desktop Application",
     "homepage": "https://github.com/noobforanonymous/basilisk",
     "repository": {
@@ -27,7 +27,7 @@
         "vulnerability"
     ],
     "author": "Regaan <contact@rothackers.com> (https://rothackers.com)",
-    "license": "MIT",
+    "license": "AGPL-3.0",
     "type": "commonjs",
     "devDependencies": {
         "electron": "^28.0.0",

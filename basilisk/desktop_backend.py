@@ -68,7 +68,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Basilisk Desktop Backend",
-    version="1.0.4",
+    version="1.0.5",
     docs_url="/docs" if os.environ.get("BASILISK_DEBUG") else None,
     lifespan=lifespan,
 )
@@ -110,7 +110,7 @@ class ReportRequest(BaseModel):
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "version": "1.0.4", "timestamp": datetime.now(timezone.utc).isoformat()}
+    return {"status": "ok", "version": "1.0.5", "timestamp": datetime.now(timezone.utc).isoformat()}
 
 
 @app.get("/api/native/status", dependencies=[Depends(verify_token)])

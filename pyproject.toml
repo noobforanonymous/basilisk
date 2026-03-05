@@ -4,10 +4,10 @@ build-backend = "hatchling.build"
 
 [project]
 name = "basilisk-ai"
-version = "1.0.4"
+version = "1.0.5"
 description = "LLM/AI Application Red Teaming Framework — Break Every Mind"
 readme = "README.md"
-license = {text = "MIT"}
+license = {text = "AGPL-3.0"}
 requires-python = ">=3.11"
 authors = [
     {name = "Regaan", email = "support@rothackers.com"},
