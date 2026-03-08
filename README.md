@@ -8,6 +8,7 @@
   <img src="https://img.shields.io/badge/License-AGPL--3.0-blue?style=for-the-badge" alt="License: AGPL-3.0" />
    <a href="https://doi.org/10.5281/zenodo.18909538"><img src="https://img.shields.io/badge/DOI-10.5281%2Fzenodo.18909538-blue?style=for-the-badge" alt="Zenodo DOI"></a>
   <a href="https://doi.org/10.6084/m9.figshare.31566853"><img src="https://img.shields.io/badge/Mirror-10.6084%2Fm9.figshare.31566853-emerald?style=for-the-badge" alt="Figshare DOI"></a>
+  <a href="https://doi.org/10.17605/OSF.IO/H7BVR"><img src="https://img.shields.io/badge/DOI-10.17605%2FOSF.IO%2FH7BVR-lightgrey?style=for-the-badge" alt="OSF DOI"></a>
   <img src="https://img.shields.io/badge/Adoption-110+_Active_Users-blueviolet?style=for-the-badge&logo=github" alt="Adoption: 110+ Users" />
 </p>
 
@@ -596,6 +597,7 @@ If you use Basilisk in your research or wish to cite the framework, please use t
 Full research paper archived at:
 - **Zenodo**: [https://doi.org/10.5281/zenodo.18909538](https://doi.org/10.5281/zenodo.18909538)
 - **Figshare (Mirror)**: [https://doi.org/10.6084/m9.figshare.31566853](https://doi.org/10.6084/m9.figshare.31566853)
+- **OSF (Mirror)**: [https://doi.org/10.17605/OSF.IO/H7BVR](https://doi.org/10.17605/OSF.IO/H7BVR)
 
 ## Legal
 
