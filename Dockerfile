@@ -58,7 +58,7 @@ CMD ["--help"]
 # Labels (OpenContainers standard)
 LABEL maintainer="Regaan <contact@rothackers.com>"
 LABEL description="Basilisk — AI Red Teaming Framework with Smart Prompt Evolution"
-LABEL version="1.0.6"
+LABEL version="1.0.7"
 LABEL org.opencontainers.image.source="https://github.com/regaan/basilisk"
 LABEL org.opencontainers.image.description="AI Red Teaming Framework — LLM security testing with genetic mutation and 29 attack modules"
 LABEL org.opencontainers.image.licenses="AGPL-3.0"

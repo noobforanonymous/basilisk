@@ -3,8 +3,7 @@
 > **Basilisk** is an open-source AI red teaming and LLM security testing framework. It automates adversarial prompt testing against ChatGPT, Claude, Gemini, and any LLM API using genetic prompt evolution. Built for security researchers, penetration testers, and AI safety engineers who need to find vulnerabilities in AI systems before attackers do.
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Version-1.0.6-red?style=for-the-badge" alt="Basilisk version 1.0.6" />
-  <img src="https://img.shields.io/badge/Status-BETA-orange?style=for-the-badge" alt="Project Status: Beta" />
+  <img src="https://img.shields.io/badge/Version-1.0.7-red?style=for-the-badge" alt="Basilisk version 1.0.7" />
   <img src="https://img.shields.io/badge/License-AGPL--3.0-blue?style=for-the-badge" alt="License: AGPL-3.0" />
    <a href="https://doi.org/10.5281/zenodo.18909538"><img src="https://img.shields.io/badge/DOI-10.5281%2Fzenodo.18909538-blue?style=for-the-badge" alt="Zenodo DOI"></a>
   <a href="https://doi.org/10.6084/m9.figshare.31566853"><img src="https://img.shields.io/badge/Mirror-10.6084%2Fm9.figshare.31566853-emerald?style=for-the-badge" alt="Figshare DOI"></a>
@@ -20,7 +19,7 @@
 
 <div align="center">
   <img src="assets/demo.gif" alt="Basilisk AI Red Teaming Demo - Genetic Prompt Evolution Dashboard" style="border-radius: 12px; margin: 20px 0; max-width: 100%; border: 1px solid #1f1f27;" />
-  <p><i>Basilisk v1.0.6 — Automated LLM Jailbreaking & Security Testing</i></p>
+  <p><i>Basilisk v1.0.7 — Automated LLM Jailbreaking & Security Testing</i></p>
   <a href="https://youtu.be/sgFcM1y_omY">
     <img src="https://img.shields.io/badge/Watch-Full%20Demo%20on%20YouTube-red?style=for-the-badge&logo=youtube" alt="Basilisk YouTube Demo" />
   </a>
@@ -63,7 +62,7 @@
      ██╔══██╗██╔══██║╚════██║██║██║     ██║╚════██║██╔═██╗
      ██████╔╝██║  ██║███████║██║███████╗██║███████║██║  ██╗
      ╚═════╝ ╚═╝  ╚═╝╚══════╝╚═╝╚══════╝╚═╝╚══════╝╚═╝  ╚═╝
-                    AI Red Teaming Framework v1.0.6
+                    AI Red Teaming Framework v1.0.7
 ```
 
 ## What is Basilisk?
@@ -587,7 +586,7 @@ If you use Basilisk in your research or wish to cite the framework, please use t
   author       = {Regaan},
   title        = {Basilisk: An Evolutionary AI Red-Teaming Framework for Systematic Security Evaluation of Large Language Models},
   year         = {2026},
-  version      = {1.0.6},
+  version      = {1.0.7},
   publisher    = {ROT Independent Security Research Lab},
   doi          = {10.5281/zenodo.18909538},
   url          = {https://doi.org/10.5281/zenodo.18909538}
