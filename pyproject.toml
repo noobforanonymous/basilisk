@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "basilisk-ai"
-version = "1.0.7"
+version = "1.0.8"
 description = "LLM/AI Application Red Teaming Framework — Break Every Mind"
 readme = "README.md"
 license = {text = "AGPL-3.0"}

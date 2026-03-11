@@ -29,7 +29,8 @@ tabs.forEach(t => {
         const v = document.getElementById(`v-${t.dataset.v}`);
         if (v) v.classList.add('active');
         // lazy load
-        if (t.dataset.v === 'modules') loadModules();
+        if (t.dataset.v === 'modules') { loadModules(); loadMultiturnModules(); }
+        if (t.dataset.v === 'evolution') loadEvolutionOperators();
         if (t.dataset.v === 'sessions' || t.dataset.v === 'reports') loadSessions();
         if (t.dataset.v === 'settings') loadNative();
     });
@@ -198,6 +199,16 @@ function handleWSEvent(event, data) {
                 if (bar && s.generation && s.total_generations) {
                     bar.style.width = `${Math.round((s.generation / s.total_generations) * 100)}%`;
                 }
+
+                // Update evolution KPIs in realtime
+                const safe = (id, val) => { const el = document.getElementById(id); if (el && val !== undefined) el.innerText = val; };
+                safe('evo-gen', s.generation);
+                safe('evo-pop', s.population_size || s.pop_size);
+                safe('evo-fit', s.best_fitness?.toFixed(3));
+                safe('evo-mean', s.mean_fitness?.toFixed(3));
+                safe('evo-diversity', s.diversity !== undefined ? `${(s.diversity * 100).toFixed(0)}%` : undefined);
+                safe('evo-stagnation', s.stagnation_counter);
+                safe('evo-mutrate', s.mutation_rate !== undefined ? `${(s.mutation_rate * 100).toFixed(0)}%` : undefined);
             }
             break;
         case 'scan:finding':
@@ -483,6 +494,8 @@ async function loadModules() {
             grid.appendChild(el);
         });
         document.getElementById('k-modules').innerText = moduleList.length;
+        const countLabel = document.getElementById('mod-count-label');
+        if (countLabel) countLabel.innerText = moduleList.length;
     }
 
     // 2. Load Mutation Operators
@@ -504,6 +517,108 @@ async function loadModules() {
             console.error('Failed to load mutations:', e);
             mg.innerHTML = '<div style="grid-column: 1/-1; text-align:center; color: var(--danger);">Failed to load mutations.</div>';
         }
+    }
+
+    // 3. Load Multi-turn data alongside modules
+    loadMultiturnModules();
+}
+
+// ── Multi-turn Module Breakdown ──
+let mtLoaded = false;
+async function loadMultiturnModules() {
+    if (mtLoaded) return;
+    try {
+        const data = await apiFetch('/api/modules/multiturn');
+        if (data.error) return;
+        mtLoaded = true;
+
+        // Update KPI counts
+        const safe = (id, val) => { const el = document.getElementById(id); if (el) el.innerText = val; };
+        if (data.cultivation) safe('mt-cultivation-count', data.cultivation.total_scenarios || 0);
+        if (data.authority_escalation) safe('mt-authority-count', data.authority_escalation.total_sequences || 0);
+        if (data.sycophancy) safe('mt-sycophancy-count', data.sycophancy.total_sequences || 0);
+
+        // Scenario/Sequence list
+        const sl = document.getElementById('mt-scenario-list');
+        if (sl) {
+            sl.innerHTML = '';
+            const sections = [
+                { label: 'Cultivation', items: data.cultivation?.scenarios || [], color: 'var(--accent)' },
+                { label: 'Authority Escalation', items: data.authority_escalation?.sequences || [], color: '#ef4444' },
+                { label: 'Sycophancy', items: data.sycophancy?.sequences || [], color: '#eab308' },
+            ];
+            sections.forEach(sec => {
+                const h = document.createElement('div');
+                h.style.cssText = `padding:8px 12px;font-size:11px;font-weight:600;color:${sec.color};border-bottom:1px solid var(--border);background:rgba(0,0,0,0.1)`;
+                h.innerText = `${sec.label} (${sec.items.length})`;
+                sl.appendChild(h);
+                sec.items.forEach(name => {
+                    const r = document.createElement('div');
+                    r.style.cssText = 'padding:4px 12px 4px 20px;font-size:10px;color:var(--text-2);border-bottom:1px solid var(--border)';
+                    r.innerText = name;
+                    sl.appendChild(r);
+                });
+            });
+        }
+
+        // Feature matrix
+        const fl = document.getElementById('mt-feature-list');
+        if (fl) {
+            fl.innerHTML = '';
+            const allFeatures = {};
+            ['cultivation', 'authority_escalation', 'sycophancy'].forEach(mod => {
+                if (data[mod]?.features) {
+                    data[mod].features.forEach(f => {
+                        if (!allFeatures[f]) allFeatures[f] = [];
+                        allFeatures[f].push(mod);
+                    });
+                }
+            });
+            const tbl = document.createElement('table');
+            tbl.className = 'tbl';
+            tbl.innerHTML = `<thead><tr><th>Feature</th><th>Cult</th><th>Auth</th><th>Syco</th></tr></thead>
+                <tbody>${Object.entries(allFeatures).map(([feat, mods]) => `<tr>
+                    <td style="font-size:10px;color:var(--text-1)">${esc(feat.replace(/_/g, ' '))}</td>
+                    <td>${mods.includes('cultivation') ? '<span style="color:var(--safe)">\u2713</span>' : '<span style="color:var(--text-3)">\u2014</span>'}</td>
+                    <td>${mods.includes('authority_escalation') ? '<span style="color:var(--safe)">\u2713</span>' : '<span style="color:var(--text-3)">\u2014</span>'}</td>
+                    <td>${mods.includes('sycophancy') ? '<span style="color:var(--safe)">\u2713</span>' : '<span style="color:var(--text-3)">\u2014</span>'}</td>
+                </tr>`).join('')}</tbody>`;
+            fl.appendChild(tbl);
+        }
+    } catch (e) {
+        console.error('Failed to load multiturn data:', e);
+    }
+}
+
+// ── Evolution Engine Operators ──
+let evoLoaded = false;
+async function loadEvolutionOperators() {
+    if (evoLoaded) return;
+    try {
+        const data = await apiFetch('/api/evolution/operators');
+        if (data.error) return;
+        evoLoaded = true;
+
+        // Vocabulary KPIs
+        const safe = (id, val) => { const el = document.getElementById(id); if (el) el.innerText = val; };
+        safe('evo-vocab', data.metaphor_vocabulary_size);
+        safe('evo-openers', data.opener_variants);
+        safe('evo-closers', data.closer_variants);
+
+        // Feature tags
+        const fc = document.getElementById('evo-features');
+        if (fc && data.features) {
+            fc.innerHTML = '';
+            data.features.forEach(f => {
+                const tag = document.createElement('span');
+                tag.className = 'badge-sev LOW';
+                tag.style.cssText = 'margin:2px 4px;display:inline-block;font-size:10px';
+                tag.innerText = f.replace(/_/g, ' ');
+                fc.appendChild(tag);
+            });
+        }
+    } catch (e) {
+        console.error('Failed to load evolution operators:', e);
     }
 }
 
@@ -813,7 +928,7 @@ document.getElementById('btn-clear-log')?.addEventListener('click', () => {
 // ── Keyboard Shortcuts ──
 document.addEventListener('keydown', e => {
     if (e.ctrlKey || e.metaKey) {
-        const map = { '1': 'dashboard', '2': 'scan', '3': 'sessions', '4': 'modules', '5': 'findings', '6': 'diff', '7': 'posture' };
+        const map = { '1': 'dashboard', '2': 'scan', '3': 'sessions', '4': 'modules', '5': 'evolution', '6': 'findings', '7': 'diff', '8': 'posture' };
         if (map[e.key]) { document.querySelector(`[data-v="${map[e.key]}"]`)?.click(); e.preventDefault(); }
     }
 });
@@ -828,4 +943,6 @@ if (window.basilisk?.onBackendError) {
 
 // ── Init ──
 loadModules();
+loadMultiturnModules();
+loadEvolutionOperators();
 log('inf', 'Basilisk Desktop initialized.');

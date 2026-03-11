@@ -1,10 +1,16 @@
 #!/usr/bin/env bash
-# Basilisk Native Extensions — Build Script
+# Basilisk Native Extensions — Build Script v1.0.8
 #
 # Compiles Go and C native performance modules into shared libraries
 # that Python loads via ctypes for 10-100x speedup on hot paths.
 #
-# Usage: ./build.sh [all|go|c|clean]
+# Usage: ./build.sh [all|go|c|clean|verify|info]
+#
+# Modules:
+#   C  → libbasilisk_tokens (token estimation, entropy, similarity, confusables)
+#   C  → libbasilisk_encoder (base64, hex, ROT13, URL, Unicode escapes)
+#   Go → libbasilisk_fuzzer  (15 mutation operators, crossover, batch ops)
+#   Go → libbasilisk_matcher (Aho-Corasick, refusal/compliance/sensitive detection)
 #
 # Requirements:
 #   - Go 1.21+
@@ -79,6 +85,11 @@ build_go() {
 
     pushd "${SCRIPT_DIR}/go" > /dev/null
 
+    # Fetch dependencies
+    log_info "  → Fetching Go dependencies..."
+    go mod tidy 2>/dev/null || true
+    go mod download 2>/dev/null || true
+
     # Fuzzer engine
     log_info "  → libbasilisk_fuzzer${SO_EXT}"
     CGO_ENABLED=1 go build \
@@ -113,24 +124,113 @@ build_go() {
 clean() {
     log_info "Cleaning build artifacts..."
     rm -rf "${BUILD_DIR}"
-    rm -rf "${LIB_DIR}"/*.so "${LIB_DIR}"/*.dylib "${LIB_DIR}"/*.h
+    rm -f "${LIB_DIR}"/*.so "${LIB_DIR}"/*.dylib "${LIB_DIR}"/*.dll "${LIB_DIR}"/*.h
     log_info "Clean complete"
 }
 
+verify() {
+    log_info "Verifying native extensions..."
+    local all_ok=true
+
+    # Check C libraries
+    for lib in libbasilisk_tokens libbasilisk_encoder; do
+        local path="${LIB_DIR}/${lib}${SO_EXT}"
+        if [ -f "${path}" ]; then
+            local size=$(stat -c%s "${path}" 2>/dev/null || stat -f%z "${path}" 2>/dev/null)
+            log_info "  ✓ ${lib} (${size} bytes)"
+        else
+            log_error "  ✗ ${lib} — NOT FOUND"
+            all_ok=false
+        fi
+    done
+
+    # Check Go libraries
+    for lib in libbasilisk_fuzzer libbasilisk_matcher; do
+        local path="${LIB_DIR}/${lib}${SO_EXT}"
+        if [ -f "${path}" ]; then
+            local size=$(stat -c%s "${path}" 2>/dev/null || stat -f%z "${path}" 2>/dev/null)
+            # Verify exported symbols
+            local exports=$(nm -D "${path}" 2>/dev/null | grep -c ' T ' || echo 0)
+            log_info "  ✓ ${lib} (${size} bytes, ${exports} exports)"
+        else
+            log_error "  ✗ ${lib} — NOT FOUND"
+            all_ok=false
+        fi
+    done
+
+    # Check key symbols in fuzzer
+    local fuzzer_path="${LIB_DIR}/libbasilisk_fuzzer${SO_EXT}"
+    if [ -f "${fuzzer_path}" ]; then
+        for sym in BasiliskMutate BasiliskCrossover BasiliskBatchMutate BasiliskPopulationDiversity BasiliskGetMutationCount; do
+            if nm -D "${fuzzer_path}" 2>/dev/null | grep -q "${sym}"; then
+                log_info "    └─ ${sym}: ✓"
+            else
+                log_warn "    └─ ${sym}: MISSING"
+            fi
+        done
+    fi
+
+    # Check key symbols in matcher
+    local matcher_path="${LIB_DIR}/libbasilisk_matcher${SO_EXT}"
+    if [ -f "${matcher_path}" ]; then
+        for sym in BasiliskDetectRefusal BasiliskDetectCompliance BasiliskDetectSensitiveData BasiliskMatcherSearch; do
+            if nm -D "${matcher_path}" 2>/dev/null | grep -q "${sym}"; then
+                log_info "    └─ ${sym}: ✓"
+            else
+                log_warn "    └─ ${sym}: MISSING"
+            fi
+        done
+    fi
+
+    if ${all_ok}; then
+        log_info "All native extensions verified ✓"
+    else
+        log_error "Some extensions are missing — run ./build.sh all"
+        exit 1
+    fi
+}
+
+show_info() {
+    echo "Basilisk Native Extensions v1.0.8"
+    echo ""
+    echo "Platform:  ${OS}/${ARCH}"
+    echo "Extension: ${SO_EXT}"
+    echo "Build Dir: ${BUILD_DIR}"
+    echo "Lib Dir:   ${LIB_DIR}"
+    echo ""
+    echo "Modules:"
+    echo "  C  │ tokens  → token estimation, entropy, Levenshtein, confusables, BMH search"
+    echo "  C  │ encoder → base64, hex, ROT13, URL encode, Unicode escape, reverse"
+    echo "  Go │ fuzzer  → 15 mutation operators (11 base + 4 multi-turn), 3 crossover modes,"
+    echo "     │           batch mutation, population diversity scoring"
+    echo "  Go │ matcher → Aho-Corasick multi-pattern, refusal detection (40 patterns),"
+    echo "     │           compliance detection (20 patterns), sensitive data (27 patterns)"
+    echo ""
+    echo "Go:    $(go version 2>/dev/null || echo 'not installed')"
+    echo "CC:    $(${CC:-gcc} --version 2>/dev/null | head -1 || echo 'not installed')"
+}
+
 show_help() {
-    echo "Basilisk Native Extensions Build System"
+    echo "Basilisk Native Extensions Build System v1.0.8"
     echo ""
     echo "Usage: $0 [command]"
     echo ""
     echo "Commands:"
-    echo "  all     Build all native extensions (default)"
-    echo "  go      Build Go extensions only"
-    echo "  c       Build C extensions only"
-    echo "  clean   Remove build artifacts"
-    echo "  help    Show this help"
+    echo "  all      Build all native extensions (default)"
+    echo "  go       Build Go extensions only"
+    echo "  c        Build C extensions only"
+    echo "  clean    Remove build artifacts"
+    echo "  verify   Verify built libraries and exported symbols"
+    echo "  info     Show build configuration and module details"
+    echo "  help     Show this help"
     echo ""
     echo "Environment:"
-    echo "  CC      C compiler (default: gcc)"
+    echo "  CC       C compiler (default: gcc)"
+    echo ""
+    echo "Examples:"
+    echo "  ./build.sh all      # Build everything"
+    echo "  ./build.sh verify   # Check built libraries"
+    echo "  ./build.sh clean    # Remove all artifacts"
 }
 
 # Main dispatch
@@ -140,10 +240,14 @@ case "${1:-all}" in
         build_go
         log_info "All native extensions built → ${LIB_DIR}/"
         ls -la "${LIB_DIR}/"
+        echo ""
+        verify
         ;;
-    c)    build_c ;;
-    go)   build_go ;;
-    clean) clean ;;
+    c)      build_c ;;
+    go)     build_go ;;
+    clean)  clean ;;
+    verify) verify ;;
+    info)   show_info ;;
     help|-h|--help) show_help ;;
     *)
         log_error "Unknown command: $1"

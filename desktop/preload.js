@@ -7,7 +7,11 @@ contextBridge.exposeInMainWorld('basilisk', {
         if (allowed.includes(channel)) ipcRenderer.send(channel, ...args);
     },
     invoke: (channel, ...args) => {
-        const allowed = ['dialog:exportReport', 'dialog:saveFile', 'window:getToken'];
+        const allowed = [
+            'dialog:exportReport', 'dialog:saveFile', 'window:getToken', 'window:getPort',
+            'backend:multiturnModules', 'backend:evolutionOperators', 'backend:moduleList',
+            'shell:openExternal',
+        ];
         if (allowed.includes(channel)) return ipcRenderer.invoke(channel, ...args);
         return Promise.reject(new Error(`IPC channel not allowed: ${channel}`));
     },
@@ -65,6 +69,20 @@ contextBridge.exposeInMainWorld('basilisk', {
             } catch (e) { /* best effort */ }
         },
     },
+
+    // Multi-turn module details
+    modules: {
+        getMultiturn: () => ipcRenderer.invoke('backend:multiturnModules'),
+        getAll: () => ipcRenderer.invoke('backend:moduleList'),
+    },
+
+    // Evolution engine info
+    evolution: {
+        getOperators: () => ipcRenderer.invoke('backend:evolutionOperators'),
+    },
+
+    // Open external URL safely
+    openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
 });
 
 // Also expose as window.api for compatibility

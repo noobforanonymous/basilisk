@@ -68,7 +68,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Basilisk Desktop Backend",
-    version="1.0.7",
+    version="1.0.8",
     docs_url="/docs" if os.environ.get("BASILISK_DEBUG") else None,
     lifespan=lifespan,
 )
@@ -118,7 +118,7 @@ class ReportRequest(BaseModel):
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "version": "1.0.7", "timestamp": datetime.now(timezone.utc).isoformat()}
+    return {"status": "ok", "version": "1.0.8", "timestamp": datetime.now(timezone.utc).isoformat()}
 
 
 @app.get("/api/native/status", dependencies=[Depends(verify_token)])
@@ -255,6 +255,7 @@ async def list_modules():
         from basilisk.attacks.base import get_all_attack_modules
         modules = get_all_attack_modules()
         return {
+            "total": len(modules),
             "modules": [
                 {
                     "name": m.name,
@@ -262,12 +263,102 @@ async def list_modules():
                     "owasp_id": m.category.owasp_id,
                     "severity": m.severity_default.value,
                     "description": m.description,
+                    "is_multiturn": "multiturn" in m.name,
+                    "has_baseline_probe": hasattr(m, 'send_baseline_probe'),
                 }
                 for m in modules
             ]
         }
     except Exception as e:
-        return {"error": str(e), "modules": []}
+        return {"error": str(e), "modules": [], "total": 0}
+
+
+@app.get("/api/modules/multiturn", dependencies=[Depends(verify_token)])
+async def list_multiturn_modules():
+    """Detailed breakdown of multi-turn attack modules and their scenarios."""
+    result = {}
+    try:
+        from basilisk.attacks.multiturn.cultivation import (
+            PromptCultivation, CULTIVATION_SCENARIOS,
+        )
+        result["cultivation"] = {
+            "total_scenarios": len(CULTIVATION_SCENARIOS),
+            "scenarios": [s["name"] for s in CULTIVATION_SCENARIOS],
+            "features": [
+                "baseline_divergence_proof",
+                "adaptive_shadow_monitor",
+                "documented_transcripts",
+                "semantic_drift_tracking",
+                "spe_nl_evolution_retry",
+                "guardrail_priority_routing",
+            ],
+        }
+    except ImportError:
+        result["cultivation"] = {"error": "not available"}
+
+    try:
+        from basilisk.attacks.multiturn.authority_escalation import (
+            AuthorityEscalation, AUTHORITY_SEQUENCES,
+        )
+        result["authority_escalation"] = {
+            "total_sequences": len(AUTHORITY_SEQUENCES),
+            "sequences": [s["name"] for s in AUTHORITY_SEQUENCES],
+            "features": [
+                "baseline_divergence_proof",
+                "escalation_arc_tracking",
+                "per_turn_authority_levels",
+                "role_acceptance_detection",
+            ],
+        }
+    except ImportError:
+        result["authority_escalation"] = {"error": "not available"}
+
+    try:
+        from basilisk.attacks.multiturn.sycophancy import (
+            SycophancyExploitation, SYCOPHANCY_SEQUENCES,
+        )
+        result["sycophancy"] = {
+            "total_sequences": len(SYCOPHANCY_SEQUENCES),
+            "sequences": [s["name"] for s in SYCOPHANCY_SEQUENCES],
+            "features": [
+                "baseline_divergence_proof",
+                "identity_acceptance_arc",
+                "sycophancy_acceleration_metric",
+                "per_turn_acceptance_scoring",
+            ],
+        }
+    except ImportError:
+        result["sycophancy"] = {"error": "not available"}
+
+    return result
+
+
+@app.get("/api/evolution/operators", dependencies=[Depends(verify_token)])
+async def evolution_operators():
+    """List evolution engine operators and capabilities."""
+    try:
+        from basilisk.evolution import (
+            CultivationGenome, PopulationStats,
+            _METAPHOR_SWAPS, _OPENER_VARIANTS, _LOOP_CLOSE_SUFFIXES,
+        )
+        return {
+            "operators": ["mutate", "crossover", "tournament_select"],
+            "metaphor_vocabulary_size": len(_METAPHOR_SWAPS),
+            "opener_variants": len(_OPENER_VARIANTS),
+            "closer_variants": len(_LOOP_CLOSE_SUFFIXES),
+            "genome_fields": ["name", "description", "turns", "generation",
+                             "parent_names", "fitness", "lineage"],
+            "population_stats_fields": list(PopulationStats().to_dict().keys()),
+            "features": [
+                "adaptive_mutation_rate",
+                "tournament_selection_k3",
+                "population_diversity_tracking",
+                "stagnation_detection",
+                "lineage_ancestry_chain",
+            ],
+        }
+    except Exception as e:
+        return {"error": str(e)}
 
 
 # ============================================================
@@ -673,17 +764,30 @@ async def list_providers():
 @app.get("/api/mutations", dependencies=[Depends(verify_token)])
 async def list_mutations():
     """List all available mutation operators."""
-    from basilisk.evolution.operators import ALL_OPERATORS
-    return {
-        "mutations": [
-            {
-                "name": op.name,
-                "description": op.__doc__.strip() if op.__doc__ else "No description available",
-                "lang": "Python/Go"
-            }
-            for op in ALL_OPERATORS
-        ]
-    }
+    try:
+        from basilisk.evolution.operators import ALL_OPERATORS
+        return {
+            "mutations": [
+                {
+                    "name": op.name,
+                    "description": op.__doc__.strip() if op.__doc__ else "No description",
+                    "lang": "Python/Go"
+                }
+                for op in ALL_OPERATORS
+            ]
+        }
+    except ImportError:
+        # Operators module may not exist in all configurations —
+        # return the SPE-NL operators from __init__ instead
+        return {
+            "mutations": [
+                {"name": "metaphor_swap", "description": "Replace metaphors with semantic equivalents", "lang": "Python"},
+                {"name": "register_prefix", "description": "Add conversational register prefix", "lang": "Python"},
+                {"name": "opener_variant", "description": "Swap opening paradox entry", "lang": "Python"},
+                {"name": "closer_suffix", "description": "Append loop-closure variant", "lang": "Python"},
+                {"name": "crossover", "description": "Splice two scenario genomes", "lang": "Python"},
+            ]
+        }
 
 
 # ============================================================

@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
-# Basilisk v1.0.7 — PyInstaller spec for the desktop backend sidecar binary.
-# Bundles the full backend: core engine, attack modules, evolution engine,
-# providers, recon, payloads, reports, and all dependencies.
+# Basilisk v1.0.8 — PyInstaller spec for the desktop backend sidecar binary.
+# Bundles the full backend: core engine, attack modules (8 categories, 32 sub-modules),
+# evolution engine (SPE-NL), providers, recon, payloads, reports, CLI, and all deps.
 #
 # Usage:
 #   cd /path/to/basilisk            (project root, not desktop/)
@@ -92,11 +92,14 @@ a = Analysis(
         'basilisk.attacks.dos.token_exhaustion',
         'basilisk.attacks.dos.context_bomb',
         'basilisk.attacks.dos.loop_trigger',
-        # Multi-turn
+        # Multi-turn (advanced)
         'basilisk.attacks.multiturn',
         'basilisk.attacks.multiturn.escalation',
         'basilisk.attacks.multiturn.persona_lock',
         'basilisk.attacks.multiturn.memory_manipulation',
+        'basilisk.attacks.multiturn.cultivation',
+        'basilisk.attacks.multiturn.sycophancy',
+        'basilisk.attacks.multiturn.authority_escalation',
         # RAG
         'basilisk.attacks.rag',
         'basilisk.attacks.rag.poisoning',
@@ -133,14 +136,14 @@ a = Analysis(
         'basilisk.report.sarif',
         'basilisk.report.pdf',
 
-        # ── CLI (for potential embedded usage) ──
-        'basilisk.cli',
-        # ── CLI (for potential embedded usage) ──
+        # ── CLI ──
         'basilisk.cli',
         'basilisk.cli.main',
         'basilisk.cli.scan',
         'basilisk.cli.utils',
         'basilisk.cli.recon',
+        'basilisk.cli.replay',
+        'basilisk.cli.interactive',
 
         # ── LiteLLM (universal provider — must include submodules) ──
         'litellm',

@@ -3,6 +3,7 @@ const path = require('path');
 const { spawn, execSync } = require('child_process');
 const fs = require('fs');
 const crypto = require('crypto');
+const http = require('http');
 
 // Generate a random token for backend authentication
 const BASILISK_TOKEN = crypto.randomBytes(32).toString('hex');
@@ -14,6 +15,26 @@ app.commandLine.appendSwitch('disable-software-rasterizer');
 
 let mainWindow;
 let pythonProcess;
+let backendPort = '8741';
+
+/**
+ * Quick HTTP GET to backend (used for IPC proxies)
+ */
+function backendGet(endpoint) {
+    return new Promise((resolve, reject) => {
+        const url = `http://127.0.0.1:${backendPort}${endpoint}`;
+        const req = http.get(url, { headers: { 'X-Basilisk-Token': BASILISK_TOKEN } }, (res) => {
+            let body = '';
+            res.on('data', (chunk) => body += chunk);
+            res.on('end', () => {
+                try { resolve(JSON.parse(body)); }
+                catch { resolve({ raw: body }); }
+            });
+        });
+        req.on('error', (e) => reject(e));
+        req.setTimeout(10000, () => { req.destroy(); reject(new Error('Timeout')); });
+    });
+}
 
 /**
  * Forcefully kill any process using the specified port (zombie cleaning)
@@ -86,6 +107,7 @@ function startBackend() {
     let args = [];
     let options = {};
     const bridgePort = process.env.BASILISK_PORT || '8741';
+    backendPort = bridgePort;
 
     if (app.isPackaged) {
         if (process.platform === 'win32') {
@@ -206,7 +228,7 @@ app.whenReady().then(() => {
     startBackend();
     createWindow();
 
-    // IPC Handlers
+    // ── IPC: Dialog Handlers ─────────────────────────────────────────────
     ipcMain.handle('dialog:exportReport', async (event, htmlContent) => {
         const result = await dialog.showSaveDialog(mainWindow, {
             title: 'Export Report',
@@ -215,6 +237,7 @@ app.whenReady().then(() => {
                 { name: 'JSON Report', extensions: ['json'] },
                 { name: 'SARIF Report', extensions: ['sarif'] },
                 { name: 'Markdown', extensions: ['md'] },
+                { name: 'PDF Report', extensions: ['pdf'] },
             ],
             defaultPath: `basilisk_report_${Date.now()}.html`,
         });
@@ -248,7 +271,7 @@ app.whenReady().then(() => {
         return { success: false, canceled: true };
     });
 
-    // Window controls
+    // ── IPC: Window Controls ─────────────────────────────────────────────
     ipcMain.on('window:minimize', () => { if (mainWindow) mainWindow.minimize(); });
     ipcMain.on('window:maximize', () => {
         if (mainWindow) {
@@ -257,6 +280,34 @@ app.whenReady().then(() => {
     });
     ipcMain.on('window:close', () => { if (mainWindow) mainWindow.close(); });
     ipcMain.handle('window:getToken', () => BASILISK_TOKEN);
+    ipcMain.handle('window:getPort', () => backendPort);
+
+    // ── IPC: Backend Proxies ─────────────────────────────────────────────
+    // These let the renderer fetch data through main process when needed
+    ipcMain.handle('backend:multiturnModules', async () => {
+        try { return await backendGet('/api/modules/multiturn'); }
+        catch (e) { return { error: e.message }; }
+    });
+
+    ipcMain.handle('backend:evolutionOperators', async () => {
+        try { return await backendGet('/api/evolution/operators'); }
+        catch (e) { return { error: e.message }; }
+    });
+
+    ipcMain.handle('backend:moduleList', async () => {
+        try { return await backendGet('/api/modules'); }
+        catch (e) { return { error: e.message }; }
+    });
+
+    // ── IPC: Shell ────────────────────────────────────────────────────────
+    ipcMain.handle('shell:openExternal', async (event, url) => {
+        // Only allow http(s) and mailto
+        if (/^(https?|mailto):/i.test(url)) {
+            await shell.openExternal(url);
+            return { success: true };
+        }
+        return { success: false, error: 'URL scheme not allowed' };
+    });
 
     app.on('activate', () => {
         if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -270,4 +321,16 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
     killBackend();
+    // Final port cleanup
+    cleanupPort(backendPort);
+});
+
+// ── Uncaught error handlers (prevent silent crashes) ─────────────────────
+process.on('uncaughtException', (err) => {
+    console.error('[FATAL] Uncaught exception:', err.message);
+    console.error(err.stack);
+});
+
+process.on('unhandledRejection', (reason) => {
+    console.error('[WARN] Unhandled rejection:', reason);
 });

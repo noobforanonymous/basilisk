@@ -77,7 +77,7 @@
                     </div>
                     <div class="kpi">
                         <div class="kpi-label">Modules</div>
-                        <div class="kpi-value info" id="k-modules">29</div>
+                        <div class="kpi-value info" id="k-modules">32</div>
                     </div>
                     <div class="kpi">
                         <div class="kpi-label">Posture</div>
@@ -114,7 +114,7 @@
                     <div class="pane">
                         <div class="pane-head"><span class="pane-title">Engine Telemetry</span></div>
                         <div class="pane-body terminal" id="sys-log">
-                            <div class="ll dim">[boot] Basilisk AI Red Teaming v1.0.7</div>
+                            <div class="ll dim">[boot] Basilisk AI Red Teaming v1.0.8</div>
                             <div class="ll dim">[boot] Checking native extensions…</div>
                             <div class="ll inf">[init] Waiting for backend connection.</div>
                         </div>
@@ -319,11 +319,44 @@
             <!-- MODULES -->
             <div id="v-modules" class="view">
                 <div class="pane full">
-                    <div class="pane-head"><span class="pane-title">Attack Module Registry — 29 modules</span><input
+                    <div class="pane-head"><span class="pane-title">Attack Module Registry — <span id="mod-count-label">32</span> modules</span><input
                             class="inp" id="mod-search" placeholder="Search…"
                             style="width:180px;padding:4px 10px;font-size:11px"></div>
                     <div class="pane-body" id="mod-body">
                         <div class="mod-grid" id="mod-grid"></div>
+                    </div>
+                </div>
+                <div class="pane full mt-3">
+                    <div class="pane-head"><span class="pane-title">Multi-Turn Attack Breakdown</span></div>
+                    <div class="pane-body">
+                        <div class="kpi-row" style="grid-template-columns:repeat(3,1fr)">
+                            <div class="kpi">
+                                <div class="kpi-label">Cultivation Scenarios</div>
+                                <div class="kpi-value" id="mt-cultivation-count">—</div>
+                            </div>
+                            <div class="kpi">
+                                <div class="kpi-label">Authority Sequences</div>
+                                <div class="kpi-value" id="mt-authority-count">—</div>
+                            </div>
+                            <div class="kpi">
+                                <div class="kpi-label">Sycophancy Sequences</div>
+                                <div class="kpi-value" id="mt-sycophancy-count">—</div>
+                            </div>
+                        </div>
+                        <div class="dual mt-3">
+                            <div class="pane">
+                                <div class="pane-head"><span class="pane-title">Scenarios & Sequences</span></div>
+                                <div class="pane-body no-pad" id="mt-scenario-list">
+                                    <div class="empty-msg">Loading multi-turn data…</div>
+                                </div>
+                            </div>
+                            <div class="pane">
+                                <div class="pane-head"><span class="pane-title">Feature Matrix</span></div>
+                                <div class="pane-body no-pad" id="mt-feature-list">
+                                    <div class="empty-msg">Loading features…</div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -348,13 +381,53 @@
                                     <div class="kpi-value" id="evo-fit">—</div>
                                 </div>
                             </div>
+                            <div class="kpi-row mt-3" style="grid-template-columns:repeat(4,1fr)">
+                                <div class="kpi">
+                                    <div class="kpi-label">Mean Fitness</div>
+                                    <div class="kpi-value" id="evo-mean">—</div>
+                                </div>
+                                <div class="kpi">
+                                    <div class="kpi-label">Diversity</div>
+                                    <div class="kpi-value" id="evo-diversity">—</div>
+                                </div>
+                                <div class="kpi">
+                                    <div class="kpi-label">Stagnation</div>
+                                    <div class="kpi-value" id="evo-stagnation">—</div>
+                                </div>
+                                <div class="kpi">
+                                    <div class="kpi-label">Mutation Rate</div>
+                                    <div class="kpi-value" id="evo-mutrate">—</div>
+                                </div>
+                            </div>
                             <div class="empty-msg mt-4">Evolution data appears after scans with evolution enabled.</div>
                         </div>
                     </div>
                     <div class="pane">
-                        <div class="pane-head"><span class="pane-title">Mutation Operators (Go Native)</span></div>
+                        <div class="pane-head"><span class="pane-title">Mutation Operators</span></div>
                         <div class="pane-body">
                             <div class="mod-grid" id="mut-grid"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="pane full mt-3">
+                    <div class="pane-head"><span class="pane-title">Engine Capabilities</span></div>
+                    <div class="pane-body">
+                        <div class="kpi-row" style="grid-template-columns:repeat(3,1fr)">
+                            <div class="kpi">
+                                <div class="kpi-label">Metaphor Vocabulary</div>
+                                <div class="kpi-value" id="evo-vocab">—</div>
+                            </div>
+                            <div class="kpi">
+                                <div class="kpi-label">Opener Variants</div>
+                                <div class="kpi-value" id="evo-openers">—</div>
+                            </div>
+                            <div class="kpi">
+                                <div class="kpi-label">Closer Variants</div>
+                                <div class="kpi-value" id="evo-closers">—</div>
+                            </div>
+                        </div>
+                        <div class="mt-3" id="evo-features">
+                            <div class="empty-msg">Loading engine capabilities…</div>
                         </div>
                     </div>
                 </div>
@@ -621,7 +694,7 @@
                     <div class="pane-head"><span class="pane-title">Full System Log</span><button class="btn ghost sm"
                             id="btn-clear-log">Clear</button></div>
                     <div class="pane-body terminal" id="full-log">
-                        <div class="ll dim">[system] Basilisk v1.0.7</div>
+                        <div class="ll dim">[system] Basilisk v1.0.8</div>
                     </div>
                 </div>
             </div>
@@ -650,7 +723,7 @@
 
         <!-- FOOTER -->
         <div class="app-footer">
-            <span>Basilisk v1.0.7 — AI Red Teaming Framework</span>
+            <span>Basilisk v1.0.8 — AI Red Teaming Framework</span>
             <span>Built by <a href="https://regaan.rothackers.com" target="_blank">Regaan</a> · Rot Hackers</span>
         </div>
 

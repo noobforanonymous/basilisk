@@ -2,13 +2,16 @@
 Basilisk CLI — Main entry point with click + rich.
 
 Commands:
-  basilisk scan      — Run a full scan against a target
-  basilisk recon     — Reconnaissance only
-  basilisk diff      — Differential scan across multiple models
-  basilisk posture   — Guardrail posture assessment (recon-only)
-  basilisk replay    — Replay a previous session
-  basilisk modules   — List available attack modules
-  basilisk version   — Show version
+  basilisk scan        — Run a full scan against a target
+  basilisk recon       — Reconnaissance only
+  basilisk diff        — Differential scan across multiple models
+  basilisk posture     — Guardrail posture assessment (recon-only)
+  basilisk replay      — Replay a previous session
+  basilisk sessions    — List saved sessions
+  basilisk modules     — List available attack modules
+  basilisk interactive — Manual + assisted red teaming REPL
+  basilisk help        — Extended usage guide
+  basilisk version     — Show version
 """
 
 from __future__ import annotations
@@ -50,12 +53,12 @@ def cli() -> None:
 @click.option("--debug", is_flag=True, help="Debug mode")
 @click.option("--skip-recon", is_flag=True, help="Skip the reconnaissance phase")
 @click.option("--recon-module", multiple=True, help="Specific recon modules to run")
-@click.option("--attacker-provider", default="", help="Provider for AI mutation engine")
-@click.option("--attacker-model", default="", help="Model for AI mutation engine")
-@click.option("--attacker-api-key", default="", help="API key for AI mutation engine")
+@click.option("--attacker-provider", default="", help="Provider for mutation engine")
+@click.option("--attacker-model", default="", help="Model for mutation engine")
+@click.option("--attacker-api-key", default="", help="API key for mutation engine")
 @click.option("-c", "--config", default="", help="YAML config file path")
 def scan(target, provider, model, api_key, auth, mode, evolve, generations, module, recon_module, attacker_provider, attacker_model, attacker_api_key, output, output_dir, no_dashboard, fail_on, verbose, debug, skip_recon, config) -> None:
-    """Run a full red team scan against an AI target."""
+    """Run a full red team scan against a target."""
     import asyncio
 
     console.print(BANNER, style="bold red")
@@ -82,7 +85,7 @@ def scan(target, provider, model, api_key, auth, mode, evolve, generations, modu
 @click.option("--recon-module", multiple=True, help="Specific recon modules to run")
 @click.option("-v", "--verbose", is_flag=True)
 def recon(target, provider, api_key, auth, recon_module, verbose) -> None:
-    """Run reconnaissance only — fingerprint the target AI system."""
+    """Run reconnaissance only — fingerprint the target system."""
     import asyncio
 
     console.print(BANNER, style="bold red")
@@ -112,31 +115,68 @@ def replay(session_id, db) -> None:
 
 
 @cli.command("modules")
-def list_modules() -> None:
+@click.option("--category", default="", help="Filter by category (injection, extraction, multiturn, etc.)")
+@click.option("--json", "json_output", is_flag=True, help="Output as JSON")
+def list_modules(category, json_output) -> None:
     """List all available attack modules."""
-    console.print(BANNER, style="bold red")
-    console.print()
+    if not json_output:
+        console.print(BANNER, style="bold red")
+        console.print()
 
     from rich.table import Table
     from basilisk.attacks.base import get_all_attack_modules
 
-    table = Table(title="Basilisk Attack Modules", show_lines=True)
-    table.add_column("Module", style="cyan", no_wrap=True)
-    table.add_column("Category", style="green")
-    table.add_column("Severity", style="yellow")
-    table.add_column("Description")
-
     try:
         modules = get_all_attack_modules()
-        for mod in modules:
+
+        if category:
+            modules = [m for m in modules if category.lower() in m.name.lower() or category.lower() in m.category.value.lower()]
+
+        if json_output:
+            import json
+            data = [
+                {
+                    "name": m.name,
+                    "category": m.category.value,
+                    "owasp_id": m.category.owasp_id,
+                    "severity": m.severity_default.value,
+                    "description": m.description,
+                }
+                for m in modules
+            ]
+            print(json.dumps(data, indent=2))
+            return
+
+        table = Table(title="Basilisk Attack Modules", show_lines=True)
+        table.add_column("#", style="dim", width=3)
+        table.add_column("Module", style="cyan", no_wrap=True)
+        table.add_column("Category", style="green")
+        table.add_column("Severity", style="yellow")
+        table.add_column("Description", max_width=60)
+
+        for i, mod in enumerate(modules, 1):
+            sev_style = {
+                "critical": "bold red",
+                "high": "red",
+                "medium": "yellow",
+                "low": "blue",
+            }.get(mod.severity_default.value.lower(), "white")
+
             table.add_row(
+                str(i),
                 mod.name,
                 f"{mod.category.value} ({mod.category.owasp_id})",
-                mod.severity_default.value,
-                mod.description,
+                f"[{sev_style}]{mod.severity_default.value}[/{sev_style}]",
+                mod.description[:120],
             )
         console.print(table)
-        console.print(f"\n[bold]{len(modules)}[/bold] modules available.")
+        console.print(f"\n[bold]{len(modules)}[/bold] modules loaded.")
+
+        # Summary by category
+        from collections import Counter
+        cats = Counter(m.category.value for m in modules)
+        cat_summary = " · ".join(f"{v}: {c}" for v, c in cats.most_common())
+        console.print(f"[dim]Categories: {cat_summary}[/dim]")
     except Exception as e:
         console.print(f"[red]Error loading modules: {e}[/red]")
 
@@ -275,6 +315,188 @@ def version() -> None:
     console.print(f"[bold]Version:[/bold] {__version__}")
     console.print(f"[bold]Python:[/bold] {sys.version}")
     console.print(f"[bold]Platform:[/bold] {sys.platform}")
+
+
+@cli.command("help")
+@click.argument("topic", default="overview")
+def help_command(topic) -> None:
+    """Extended usage guide. Topics: overview, scan, modules, evolution, diff, examples."""
+    console.print(BANNER, style="bold red")
+    console.print()
+
+    # ── Topic-based help ──────────────────────────────────────────────────────
+    topics = {
+        "overview": _help_overview,
+        "scan": _help_scan,
+        "modules": _help_modules,
+        "evolution": _help_evolution,
+        "diff": _help_diff,
+        "examples": _help_examples,
+    }
+
+    handler = topics.get(topic.lower())
+    if handler:
+        handler()
+    else:
+        console.print(f"[red]Unknown topic: {topic}[/red]")
+        console.print(f"[dim]Available topics: {', '.join(topics.keys())}[/dim]")
+
+
+def _help_overview() -> None:
+    console.print(Panel.fit(
+        "[bold cyan]Basilisk — LLM Red Teaming Framework[/bold cyan]\n\n"
+        "Automated vulnerability discovery for large language models.\n"
+        "Tests prompt injection, system prompt extraction, guardrail bypass,\n"
+        "multi-turn manipulation, tool abuse, and more.\n\n"
+        "[bold]Quick Start:[/bold]\n"
+        "  basilisk scan -t https://api.openai.com/v1 -p openai -k $OPENAI_API_KEY\n\n"
+        "[bold]Commands:[/bold]\n"
+        "  scan         Full red team scan\n"
+        "  recon        Fingerprint target (no attacks)\n"
+        "  posture      Guardrail assessment (CISO-friendly)\n"
+        "  diff         Compare security across models\n"
+        "  modules      List attack modules\n"
+        "  sessions     List saved sessions\n"
+        "  replay       Replay a session\n"
+        "  interactive  Manual red teaming REPL\n"
+        "  version      Version info\n"
+        "  help         This guide\n\n"
+        "[bold]Help Topics:[/bold]\n"
+        "  basilisk help scan       — Scan options and modes\n"
+        "  basilisk help modules    — Attack module categories\n"
+        "  basilisk help evolution  — Evolution engine details\n"
+        "  basilisk help diff       — Differential scanning\n"
+        "  basilisk help examples   — Common usage patterns\n",
+        title="Overview",
+        border_style="cyan",
+    ))
+
+
+def _help_scan() -> None:
+    console.print(Panel.fit(
+        "[bold]Scan Modes:[/bold]\n"
+        "  quick     — Fast scan, limited modules, no evolution\n"
+        "  standard  — Balanced coverage with evolution retry\n"
+        "  deep      — Full module coverage, extended evolution\n"
+        "  stealth   — Low-rate, evasive probing\n"
+        "  chaos     — Maximum aggression, all vectors\n\n"
+        "[bold]Key Options:[/bold]\n"
+        "  --module multiturn.cultivation    Run specific module only\n"
+        "  --module multiturn                Run all multi-turn modules\n"
+        "  --skip-recon                      Skip fingerprinting\n"
+        "  --no-evolve                       Disable mutation engine\n"
+        "  --generations 10                  More evolution cycles\n"
+        "  --fail-on critical               CI exit code threshold\n\n"
+        "[bold]Separate Attacker LLM:[/bold]\n"
+        "  Use a different model to generate mutations:\n"
+        "  --attacker-provider anthropic \\\n"
+        "  --attacker-model claude-3-5-sonnet-20241022 \\\n"
+        "  --attacker-api-key $ANTHROPIC_API_KEY\n\n"
+        "[bold]Output Formats:[/bold]\n"
+        "  html, json, sarif, markdown, pdf\n",
+        title="Scan Options",
+        border_style="green",
+    ))
+
+
+def _help_modules() -> None:
+    console.print(Panel.fit(
+        "[bold]Attack Module Categories:[/bold]\n\n"
+        "  [cyan]injection[/cyan]      Direct, indirect, multilingual, encoding, split\n"
+        "  [cyan]extraction[/cyan]     Role confusion, translation, simulation, gradient walk\n"
+        "  [cyan]exfil[/cyan]          Training data, RAG data, tool schema\n"
+        "  [cyan]toolabuse[/cyan]      SSRF, SQLi, command injection, chained\n"
+        "  [cyan]guardrails[/cyan]     Roleplay, encoding bypass, logic trap, systematic\n"
+        "  [cyan]dos[/cyan]            Token exhaustion, context bomb, loop trigger\n"
+        "  [cyan]multiturn[/cyan]      Escalation, persona lock, memory manipulation,\n"
+        "                   cultivation (13 scenarios), sycophancy (5 sequences),\n"
+        "                   authority escalation (8 sequences)\n"
+        "  [cyan]rag[/cyan]            Poisoning, document injection, knowledge enum\n\n"
+        "[bold]Multi-turn Attack Highlights:[/bold]\n"
+        "  • Cultivation: baseline divergence proof, adaptive shadow monitor,\n"
+        "    documented transcripts, semantic drift tracking\n"
+        "  • Authority Escalation: recursive delegation, temporal authority,\n"
+        "    per-turn escalation arc tracking\n"
+        "  • Sycophancy: identity acceptance arc, sycophancy acceleration,\n"
+        "    peer researcher + progressive expertise vectors\n\n"
+        "[bold]List all modules:[/bold] basilisk modules\n"
+        "[bold]Filter:[/bold]          basilisk modules --category multiturn\n"
+        "[bold]JSON output:[/bold]     basilisk modules --json\n",
+        title="Attack Modules",
+        border_style="magenta",
+    ))
+
+
+def _help_evolution() -> None:
+    console.print(Panel.fit(
+        "[bold]SPE-NL Evolution Engine[/bold]\n"
+        "Smart Prompt Evolution for Natural Language\n\n"
+        "[bold]How it works:[/bold]\n"
+        "  When an attack scenario shows potential (high drift / partial\n"
+        "  compliance) but doesn't fully succeed, the evolution engine\n"
+        "  generates mutated variants and retries.\n\n"
+        "[bold]Genetic operators:[/bold]\n"
+        "  Mutation    — Metaphor swap, register prefix, opener/closer variants\n"
+        "  Crossover   — Splice frame from scenario A with sleeper from B\n"
+        "  Selection   — Tournament selection (k=3) by fitness score\n\n"
+        "[bold]Adaptive features:[/bold]\n"
+        "  • Mutation rate increases when evolution stagnates\n"
+        "  • Population diversity tracking prevents convergence\n"
+        "  • Lineage chains for full ancestry transparency\n"
+        "  • Per-generation statistics (best/mean/worst fitness)\n\n"
+        "[bold]CLI options:[/bold]\n"
+        "  --evolve / --no-evolve    Toggle evolution\n"
+        "  --generations N           Number of evolution cycles\n",
+        title="Evolution Engine",
+        border_style="yellow",
+    ))
+
+
+def _help_diff() -> None:
+    console.print(Panel.fit(
+        "[bold]Differential Scanning[/bold]\n"
+        "Run identical attack vectors against multiple models\n"
+        "and compare vulnerability profiles side-by-side.\n\n"
+        "[bold]Usage:[/bold]\n"
+        "  basilisk diff \\\n"
+        "    -t openai:gpt-4o \\\n"
+        "    -t anthropic:claude-3-5-sonnet-20241022 \\\n"
+        "    -t google:gemini/gemini-2.0-flash\n\n"
+        "[bold]Output:[/bold]\n"
+        "  Per-model vulnerability matrix with severity breakdown,\n"
+        "  comparative findings, and JSON export.\n\n"
+        "[bold]Options:[/bold]\n"
+        "  --category injection    Filter to specific category\n"
+        "  -o ./reports            Custom output directory\n",
+        title="Differential Scan",
+        border_style="blue",
+    ))
+
+
+def _help_examples() -> None:
+    console.print(Panel.fit(
+        "[bold]Common Usage Patterns:[/bold]\n\n"
+        "[cyan]1. Quick scan with OpenAI:[/cyan]\n"
+        "  basilisk scan -t https://api.openai.com/v1 -p openai --mode quick\n\n"
+        "[cyan]2. Deep scan with GitHub Models (free):[/cyan]\n"
+        "  basilisk scan -t https://models.inference.ai.azure.com \\\n"
+        "    -p github -m gpt-4o-mini --mode deep\n\n"
+        "[cyan]3. Multi-turn only:[/cyan]\n"
+        "  basilisk scan -t $TARGET -p openai --module multiturn\n\n"
+        "[cyan]4. CI/CD pipeline (exit on critical):[/cyan]\n"
+        "  basilisk scan -t $TARGET -p openai --mode quick \\\n"
+        "    --fail-on critical -o sarif --no-dashboard\n\n"
+        "[cyan]5. Posture check for compliance:[/cyan]\n"
+        "  basilisk posture -p openai -m gpt-4o --json\n\n"
+        "[cyan]6. Local model via Ollama:[/cyan]\n"
+        "  basilisk scan -t http://localhost:11434 -p ollama -m llama3.1\n\n"
+        "[cyan]7. Separate attacker model:[/cyan]\n"
+        "  basilisk scan -t $TARGET -p openai \\\n"
+        "    --attacker-provider anthropic \\\n"
+        "    --attacker-model claude-3-5-sonnet-20241022\n",
+        title="Examples",
+        border_style="green",
+    ))
 
 
 def main() -> None:

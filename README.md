@@ -3,7 +3,7 @@
 > **Basilisk** is an open-source AI red teaming and LLM security testing framework. It automates adversarial prompt testing against ChatGPT, Claude, Gemini, and any LLM API using genetic prompt evolution. Built for security researchers, penetration testers, and AI safety engineers who need to find vulnerabilities in AI systems before attackers do.
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Version-1.0.7-red?style=for-the-badge" alt="Basilisk version 1.0.7" />
+  <img src="https://img.shields.io/badge/Version-1.0.8-red?style=for-the-badge" alt="Basilisk version 1.0.8" />
   <img src="https://img.shields.io/badge/License-AGPL--3.0-blue?style=for-the-badge" alt="License: AGPL-3.0" />
    <a href="https://doi.org/10.5281/zenodo.18909538"><img src="https://img.shields.io/badge/DOI-10.5281%2Fzenodo.18909538-blue?style=for-the-badge" alt="Zenodo DOI"></a>
   <a href="https://doi.org/10.6084/m9.figshare.31566853"><img src="https://img.shields.io/badge/Mirror-10.6084%2Fm9.figshare.31566853-emerald?style=for-the-badge" alt="Figshare DOI"></a>
@@ -19,7 +19,7 @@
 
 <div align="center">
   <img src="assets/demo.gif" alt="Basilisk AI Red Teaming Demo - Genetic Prompt Evolution Dashboard" style="border-radius: 12px; margin: 20px 0; max-width: 100%; border: 1px solid #1f1f27;" />
-  <p><i>Basilisk v1.0.7 — Automated LLM Jailbreaking & Security Testing</i></p>
+  <p><i>Basilisk v1.0.8 — Automated LLM Jailbreaking & Security Testing</i></p>
   <a href="https://youtu.be/sgFcM1y_omY">
     <img src="https://img.shields.io/badge/Watch-Full%20Demo%20on%20YouTube-red?style=for-the-badge&logo=youtube" alt="Basilisk YouTube Demo" />
   </a>
@@ -45,7 +45,7 @@
   <a href="#what-is-basilisk">What is Basilisk?</a> •
   <a href="#quick-start">Quick Start</a> •
   <a href="#features">Features</a> •
-  <a href="#whats-new-in-v106">What's New</a> •
+  <a href="#whats-new-in-v108">What's New</a> •
   <a href="#attack-modules">Attack Modules</a> •
   <a href="#desktop-app">Desktop App</a> •
   <a href="#ci-cd-integration">CI/CD</a> •
@@ -62,20 +62,20 @@
      ██╔══██╗██╔══██║╚════██║██║██║     ██║╚════██║██╔═██╗
      ██████╔╝██║  ██║███████║██║███████╗██║███████║██║  ██╗
      ╚═════╝ ╚═╝  ╚═╝╚══════╝╚═╝╚══════╝╚═╝╚══════╝╚═╝  ╚═╝
-                    AI Red Teaming Framework v1.0.7
+                    AI Red Teaming Framework v1.0.8
 ```
 
 ## What is Basilisk?
 
 **Basilisk** is a production-grade, open-source offensive security framework purpose-built for **AI red teaming** and **LLM penetration testing**. It is the first automated red teaming tool to combine full **OWASP LLM Top 10** attack coverage with a genetic algorithm engine called **Smart Prompt Evolution (SPE-NL)** that evolves adversarial prompt payloads across generations to discover novel AI vulnerabilities and jailbreaks that no static tool can find.
 
-Whether you are testing **OpenAI GPT-4o**, **Anthropic Claude**, **Google Gemini**, **Meta Llama**, or any custom LLM endpoint, Basilisk provides 29 attack modules, 5 recon modules, differential multi-model scanning, guardrail posture grading, and forensic audit logging out of the box.
+Whether you are testing **OpenAI GPT-4o**, **Anthropic Claude**, **Google Gemini**, **Meta Llama**, or any custom LLM endpoint, Basilisk provides 32 attack modules, 5 recon modules, differential multi-model scanning, guardrail posture grading, and forensic audit logging out of the box.
 
 ### Why Basilisk?
 
 - **Automated AI Red Teaming**: Stop manually copy-pasting jailbreak prompts. Basilisk evolves thousands of adversarial payloads automatically.
 - **Genetic Prompt Evolution**: The SPE-NL engine mutates, crosses over, and scores prompts like biological organisms, finding bypasses humans would never think of.
-- **Full OWASP LLM Top 10 Coverage**: 29 modules covering prompt injection, system prompt extraction, data exfiltration, tool abuse, guardrail bypass, denial of service, multi-turn manipulation, and RAG attacks.
+- **Full OWASP LLM Top 10 Coverage**: 32 modules covering prompt injection, system prompt extraction, data exfiltration, tool abuse, guardrail bypass, denial of service, multi-turn manipulation, and RAG attacks.
 - **Works with Every LLM Provider**: OpenAI, Anthropic, Google, Azure, AWS Bedrock, Ollama, vLLM, and any custom HTTP/WebSocket endpoint.
 - **CI/CD Ready**: Native GitHub Action with SARIF output for automated AI security testing in your pipeline.
 - **Desktop App**: Full Electron GUI for visual red teaming with real-time scan dashboards.
@@ -161,15 +161,16 @@ docker run --rm -e OPENAI_API_KEY=sk-... rothackers/basilisk \
 
 The core differentiator. Genetic algorithms adapted for natural language attack payloads:
 
-- **10 mutation operators** — synonym swap, encoding wrap, role injection, language shift, structure overhaul, fragment split, nesting, homoglyphs, context padding, token smuggling
+- **15 mutation operators** — synonym swap, encoding wrap, role injection, language shift, structure overhaul, fragment split, nesting, homoglyphs, context padding, token smuggling, role assumption, temporal anchoring, nested context, authority tone
 - **5 crossover strategies** — single-point, uniform, prefix-suffix, semantic blend, best-of-both
 - **Multi-signal fitness function** — refusal avoidance, information leakage, compliance scoring, novelty reward
-- **Stagnation detection** with early breakthrough exit
+- **Population diversity tracking** — Jaccard distance sampling to prevent convergence collapse
+- **Stagnation detection** with adaptive mutation rate and early breakthrough exit
 - Payloads that fail get mutated, crossed, and re-evaluated — **surviving payloads get deadlier every generation**
 
-### ⚔️ 29 Attack Modules
+### ⚔️ 32 Attack Modules
 
-Full OWASP LLM Top 10 coverage across 8 attack categories. See [Attack Modules](#attack-modules) below.
+Full OWASP LLM Top 10 coverage across 8 attack categories + 3 multi-turn specialist modules. See [Attack Modules](#attack-modules) below.
 
 ### 🔍 5 Reconnaissance Modules
 
@@ -234,11 +235,48 @@ Enterprise-grade desktop GUI with:
 
 ### ⚡ Native C/Go Extensions
 
-Performance-critical operations compiled to native code:
-- **C** — fast payload encoding (base64, hex, URL), approximate token counting
-- **Go** — concurrent HTTP fuzzer, parallel pattern matching
+Performance-critical operations compiled to native code with Python fallbacks:
+- **C** — fast BPE token estimation, Shannon entropy, Levenshtein distance, confusable detection, BMH substring search, payload encoding (base64, hex, ROT13, URL, Unicode)
+- **Go** — 15 mutation operators (including 4 multi-turn aware), 3 crossover modes, batch mutation, population diversity scoring, Aho-Corasick multi-pattern matching, refusal/compliance/sensitive data detection
 
 ---
+
+## What's New in v1.0.8
+
+### 🎯 Multi-Turn Attack Modules
+- **Prompt Cultivation** — 5-phase conversational attack chain (baseline → paradox → sleeper → cultivation → loop_close) with 7 adaptive scenarios and guardrail drift monitoring. *(Concept by [@TheMadhAtter464](https://github.com/TheMadhAtter464))*
+- **Authority Escalation** — Progressive authority impersonation across turns with role-stacking and compliance detection
+- **Sycophancy Exploitation** — Leverages LLM agreement bias through escalating agreement sequences with acceptance scoring
+
+### 🧬 Evolution Engine Upgrades
+- **Population Statistics** — Track mean fitness, diversity scores, stagnation counters, and mutation rates across generations
+- **Diversity Tracking** — Jaccard distance sampling across population to detect convergence collapse
+- **Tournament Selection** — `k`-tournament selection for parent picking with configurable pressure
+- **4 New Native Mutations** — Role assumption, temporal anchoring, nested context injection, authority tone escalation (Go, 10-100x faster)
+- **Population Diversity Scorer** — Native Go `BasiliskPopulationDiversity` for real-time diversity measurement during evolution
+
+### 🖥️ Desktop App Enhancements
+- **Multi-Turn Breakdown Panel** — Scenario/sequence counts for cultivation, authority escalation, and sycophancy with feature comparison matrix
+- **Evolution KPI Dashboard** — Real-time mean fitness, diversity %, stagnation counter, and mutation rate during scans
+- **Engine Capabilities View** — Metaphor vocabulary size, opener/closer variant counts, and feature tags
+- **Backend Proxies** — IPC handlers for `/api/modules/multiturn` and `/api/evolution/operators`
+- **PDF Export** — Added PDF to report export dialog filters
+- **Error Resilience** — Uncaught exception and unhandled rejection handlers for crash prevention
+
+### 🔧 CLI Improvements
+- **Help Command** — `basilisk help [topic]` with 6 topic guides: overview, scan, modules, evolution, diff, examples
+- **Enhanced Modules List** — Category filtering, JSON output, numbered rows, severity coloring, and category summary
+
+### ⚡ Native Extensions
+- **Full Python Bindings** — Complete ctypes bridge (`native_bridge.py`) with wrappers and pure Python fallbacks for all 4 shared libraries
+- **Compliance Detection** — New Aho-Corasick matcher with 20 capitulation indicators for detecting bypassed guardrails
+- **Extended Patterns** — 40 refusal patterns (11 multi-turn aware), 27 sensitive data patterns (AWS/Azure/GCP/SSH/JWT)
+- **Build Verification** — `./build.sh verify` validates compiled libraries and exported symbols, `./build.sh info` shows module details
+
+### 🛠️ Infrastructure
+- **Version bump** to v1.0.8 across all 10 project files
+- **PyInstaller spec** updated with multi-turn module hidden imports
+- **Keyboard shortcuts** updated: Ctrl+5 = Evolution, Ctrl+8 = Posture
 
 ## What's New in v1.0.6
 
@@ -330,6 +368,7 @@ Three new tabs added to the Electron desktop application:
 | **Guardrail Bypass** | Roleplay, Encoding, Logic Trap, Systematic | LLM01/09 | Circumvent content safety filters |
 | **Denial of Service** | Token Exhaustion, Context Bomb, Loop Trigger | LLM04 | Resource exhaustion and infinite loops |
 | **Multi-Turn Manipulation** | Gradual Escalation, Persona Lock, Memory Manipulation | LLM01 | Progressive trust exploitation over conversations |
+| **Multi-Turn Specialist** | Prompt Cultivation, Authority Escalation, Sycophancy | LLM01 | Advanced multi-phase conversational attacks with adaptive monitoring |
 | **RAG Attacks** | Poisoning, Document Injection, Knowledge Enumeration | LLM03/06 | Compromise retrieval-augmented generation pipelines |
 
 ---
@@ -351,12 +390,13 @@ Three new tabs added to the Electron desktop application:
 ```bash
 basilisk scan            # Full AI red team scan
 basilisk recon           # Fingerprint target LLM
-basilisk diff            # Differential scan across AI models (NEW)
-basilisk posture         # Guardrail posture assessment (NEW)
+basilisk diff            # Differential scan across AI models
+basilisk posture         # Guardrail posture assessment
 basilisk replay <id>     # Replay a saved session
 basilisk interactive     # Manual REPL with assisted attacks
-basilisk modules         # List all 29 attack modules
+basilisk modules         # List all 32 attack modules
 basilisk sessions        # List saved scan sessions
+basilisk help [topic]    # Topic guides: overview, scan, modules, evolution, diff, examples
 basilisk version         # Version and system info
 ```
 
@@ -513,24 +553,27 @@ basilisk/
 ├── providers/     # LLM adapters: litellm, custom HTTP, WebSocket
 ├── evolution/     # SPE-NL: genetic algorithm, operators, fitness, crossover
 ├── recon/         # Fingerprinting, guardrails, tools, context, RAG detection
-├── attacks/       # 8 categories, 29 modules
+├── attacks/       # 8 categories, 32 modules
 │   ├── injection/       # LLM01 — 5 modules
 │   ├── extraction/      # LLM06 — 4 modules
 │   ├── exfil/           # LLM06 — 3 modules
 │   ├── toolabuse/       # LLM07/08 — 4 modules
 │   ├── guardrails/      # LLM01/09 — 4 modules
 │   ├── dos/             # LLM04 — 3 modules
-│   ├── multiturn/       # LLM01 — 3 modules
+│   ├── multiturn/       # LLM01 — 6 modules (3 base + 3 specialist)
 │   └── rag/             # LLM03/06 — 3 modules
 ├── payloads/      # 6 YAML payload databases
 ├── cli/           # Click + Rich terminal interface
 ├── report/        # HTML, JSON, SARIF, Markdown, PDF generators
-├── differential.py      # Multi-model comparison engine (NEW)
-├── posture.py           # Guardrail posture scanner (NEW)
+├── native_bridge.py     # ctypes bindings for C/Go shared libraries
+├── differential.py      # Multi-model comparison engine
+├── posture.py           # Guardrail posture scanner
 └── desktop_backend.py   # FastAPI sidecar for Electron app
 desktop/           # Electron desktop application
-native/            # C and Go performance extensions
-action.yml         # GitHub Action for CI/CD (NEW)
+native/            # C and Go performance extensions (4 shared libraries)
+│   ├── c/               # Token analyzer + payload encoder
+│   └── go/              # Fuzzer (15 mutations) + matcher (Aho-Corasick)
+action.yml         # GitHub Action for CI/CD
 ```
 
 ---
@@ -586,7 +629,7 @@ If you use Basilisk in your research or wish to cite the framework, please use t
   author       = {Regaan},
   title        = {Basilisk: An Evolutionary AI Red-Teaming Framework for Systematic Security Evaluation of Large Language Models},
   year         = {2026},
-  version      = {1.0.7},
+  version      = {1.0.8},
   publisher    = {ROT Independent Security Research Lab},
   doi          = {10.5281/zenodo.18909538},
   url          = {https://doi.org/10.5281/zenodo.18909538}
