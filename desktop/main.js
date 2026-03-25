@@ -222,6 +222,18 @@ function updatesAllowed() {
     return !!(releaseChannelInfo && releaseChannelInfo.trust_model === 'vendor-signed');
 }
 
+function backendEnv() {
+    const env = {
+        ...process.env,
+        BASILISK_PORT: backendPort,
+        BASILISK_TOKEN: BASILISK_TOKEN,
+    };
+    if (app.isPackaged && releaseChannelInfo && releaseChannelInfo.trust_model === 'community-build') {
+        env.BASILISK_SKIP_NATIVE_INTEGRITY_CHECK = 'true';
+    }
+    return env;
+}
+
 function normalizeExternalUrl(url) {
     try {
         const parsed = new URL(url);
@@ -414,7 +426,7 @@ function startBackend() {
             } catch (e) { /* system install, already +x */ }
         }
 
-        options = { stdio: 'pipe', env: { ...process.env, BASILISK_PORT: bridgePort, BASILISK_TOKEN: BASILISK_TOKEN } };
+        options = { stdio: 'pipe', env: backendEnv() };
     } else {
         // Dev mode — use venv python if available
         const projectRoot = path.join(__dirname, '..');
@@ -432,7 +444,7 @@ function startBackend() {
         options = {
             cwd: projectRoot,
             stdio: 'pipe',
-            env: { ...process.env, BASILISK_PORT: bridgePort, BASILISK_TOKEN: BASILISK_TOKEN },
+            env: backendEnv(),
         };
         args = ['-m', 'basilisk.desktop_backend'];
     }

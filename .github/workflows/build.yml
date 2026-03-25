@@ -61,6 +61,7 @@ jobs:
             pip install .
             pip install pyinstaller
           fi
+        shell: bash
 
       - name: Install Extra Python Dependencies
         run: |

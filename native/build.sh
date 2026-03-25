@@ -70,6 +70,15 @@ write_manifest() {
 
 sign_manifests() {
     local py="${PYTHON:-python3}"
+    local key_inline="${BASILISK_NATIVE_SIGNING_KEY:-${BASILISK_RELEASE_SIGNING_KEY:-}}"
+    local key_file="${BASILISK_NATIVE_SIGNING_KEY_FILE:-${BASILISK_RELEASE_SIGNING_KEY_FILE:-${SCRIPT_DIR}/../build/release-signing.key}}"
+
+    if [ -z "${key_inline}" ] && [ ! -f "${key_file}" ]; then
+        log_warn "No native manifest signing key found; leaving manifests unsigned for this build."
+        rm -f "${BUILD_DIR}/manifest.sig" "${LIB_DIR}/manifest.sig" "${SCRIPT_DIR}/../build/native-public.key"
+        return 0
+    fi
+
     "${py}" "${SCRIPT_DIR}/../scripts/sign_native_manifests.py" \
         "${BUILD_DIR}/manifest.json" \
         "${LIB_DIR}/manifest.json"
