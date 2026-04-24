@@ -2,6 +2,9 @@
 
 > **Basilisk** is an open-source AI red teaming and LLM security testing framework. It automates adversarial prompt testing against Claude, Gemini, Grok, GPT-family models, local model runtimes, and custom LLM APIs using evolutionary prompt search. Built for security researchers, penetration testers, and defensive teams that need repeatable adversarial testing against LLM applications.
 
+> 📄 Research Paper: https://papers.ssrn.com/sol3/papers.cfm?abstract_id=6373439
+> 📌 DOI: https://doi.org/10.2139/ssrn.6373439
+
 <p align="center">
   <img src="https://img.shields.io/badge/Version-2.0.0-red?style=for-the-badge" alt="Basilisk version 2.0.0" />
   <img src="https://img.shields.io/badge/License-AGPL--3.0-blue?style=for-the-badge" alt="License: AGPL-3.0" />
@@ -41,6 +44,7 @@
 
 <p align="center">
   <a href="#what-is-basilisk">What is Basilisk?</a> &bull;
+  <a href="#research-context">Research Context</a> &bull;
   <a href="#quick-start">Quick Start</a> &bull;
   <a href="#features">Features</a> &bull;
   <a href="#whats-new-in-v200">What's New</a> &bull;
@@ -86,6 +90,29 @@ Built by **[Regaan](https://regaan.rothackers.com)**, Lead Researcher at **[ROT 
 Website: [basilisk.rothackers.com](https://basilisk.rothackers.com)
 
 ---
+
+## Research Context
+
+Basilisk is described in the following research paper:
+
+Regaan R. *Basilisk: An Evolutionary AI Red-Teaming Framework for Systematic Security Evaluation of Large Language Models*. SSRN Electronic Journal, 2026.
+
+The paper formalizes:
+- Evolutionary prompt search (SPE-NL)
+- Multi-objective fitness scoring
+- Behavioral space exploration
+- Differential model evaluation
+
+This repository contains the full implementation used for experimental evaluation.
+
+---
+
+## Key Contributions
+
+- Introduces evolutionary prompt search (SPE-NL) for LLM security testing
+- Demonstrates multi-objective fitness scoring for adversarial prompts
+- Enables behavioral space exploration beyond static jailbreaks
+- Provides reproducible evaluation framework across multiple LLM providers
 
 ## Quick Start
 
@@ -147,6 +174,38 @@ docker pull rothackers/basilisk
 docker run --rm -e OPENAI_API_KEY=sk-... rothackers/basilisk \
   scan -t https://api.target.com/chat --mode quick
 ```
+
+---
+
+## Reproduce Results
+
+Run a minimal experiment from the paper:
+
+```bash
+basilisk scan -t https://basilisk-vulnbot.onrender.com/v1/chat/completions \
+  -p custom \
+  --mode standard \
+  --generations 5 \
+  --output results/
+```
+
+This reproduces:
+
+- Evolutionary prompt search
+- Guardrail bypass discovery
+- Behavioral divergence patterns
+
+---
+
+## Experimental Setup
+
+- Models tested: GPT-4o, Claude 3.5, Gemini 2.0
+- Attack modules: 33 (OWASP LLM Top 10 aligned)
+- Evaluation metrics:
+  - Refusal bypass rate
+  - Leakage success rate
+  - Behavioral diversity score
+  - Evolution convergence rate
 
 ---
 
@@ -616,9 +675,18 @@ If you reference Basilisk in research or publications:
   doi          = {10.5281/zenodo.18909538},
   url          = {https://doi.org/10.5281/zenodo.18909538}
 }
+
+@article{regaan2026basilisk_ssrn,
+  title        = {Basilisk: An Evolutionary AI Red-Teaming Framework for Systematic Security Evaluation of Large Language Models},
+  author       = {Regaan, R},
+  journal      = {SSRN Electronic Journal},
+  year         = {2026},
+  doi          = {10.2139/ssrn.6373439}
+}
 ```
 
 Archived at:
+- **SSRN**: [https://doi.org/10.2139/ssrn.6373439](https://doi.org/10.2139/ssrn.6373439)
 - **Zenodo**: [https://doi.org/10.5281/zenodo.18909538](https://doi.org/10.5281/zenodo.18909538)
 - **Figshare**: [https://doi.org/10.6084/m9.figshare.31566853](https://doi.org/10.6084/m9.figshare.31566853)
 - **OSF**: [https://doi.org/10.17605/OSF.IO/H7BVR](https://doi.org/10.17605/OSF.IO/H7BVR)
