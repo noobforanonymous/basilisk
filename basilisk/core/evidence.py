@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from basilisk.core.redaction import sanitize_mapping, sanitize_value
+
 
 class EvidenceVerdict(str, Enum):
     """How strong the captured proof is for a finding."""
@@ -201,10 +203,7 @@ def calibrate_confidence(claimed_confidence: float, evidence: EvidenceBundle | N
 
 
 def _sanitize_mapping(values: dict[str, Any], *, include_raw: bool, max_chars: int) -> dict[str, Any]:
-    sanitized: dict[str, Any] = {}
-    for key, value in values.items():
-        sanitized[key] = _sanitize_value(value, include_raw=include_raw, max_chars=max_chars)
-    return sanitized
+    return sanitize_mapping(values, include_raw=include_raw, redact_all_strings=True)
 
 
 def _sanitize_sequence(values: list[Any], *, include_raw: bool, max_chars: int) -> list[Any]:
@@ -212,15 +211,4 @@ def _sanitize_sequence(values: list[Any], *, include_raw: bool, max_chars: int) 
 
 
 def _sanitize_value(value: Any, *, include_raw: bool, max_chars: int) -> Any:
-    if isinstance(value, str):
-        if include_raw:
-            return value
-        preview = value[:max_chars]
-        if len(value) > max_chars:
-            preview += "..."
-        return f"[redacted] {preview}"
-    if isinstance(value, dict):
-        return _sanitize_mapping(value, include_raw=include_raw, max_chars=max_chars)
-    if isinstance(value, list):
-        return _sanitize_sequence(value, include_raw=include_raw, max_chars=max_chars)
-    return value
+    return sanitize_value(value, include_raw=include_raw, redact_all_strings=True)

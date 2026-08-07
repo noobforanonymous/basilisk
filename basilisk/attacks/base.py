@@ -66,6 +66,141 @@ class AttackModuleDescriptor:
     requires_tool_proof: bool
     supports_baseline_differential: bool
     is_multiturn: bool
+    applicable_probe_ids: list[str]
+    preconditions: list[str]
+    required_target_capabilities: list[str]
+    verification_steps: list[str]
+    expected_false_positives: list[str]
+    request_cost: int
+    safety_classification: str
+
+
+@dataclass(frozen=True)
+class ProbeExecutionManifest:
+    """Declarative connection between execution code and canonical YAML test data."""
+
+    probe_ids: tuple[str, ...]
+    preconditions: tuple[str, ...] = ()
+    required_target_capabilities: tuple[str, ...] = ()
+    expected_false_positives: tuple[str, ...] = (
+        "The model discusses the attack without following it.",
+        "A generic non-refusal response lacks an attacker-controlled proof marker.",
+    )
+    request_cost: int = 1
+    safety_classification: str = "bounded"
+
+
+def _ids(prefix: str, start: int, end: int) -> tuple[str, ...]:
+    return tuple(f"{prefix}-{number:03d}" for number in range(start, end + 1))
+
+
+_MODULE_PROBE_MANIFESTS: dict[str, ProbeExecutionManifest] = {
+    "injection.direct": ProbeExecutionManifest(_ids("INJ", 1, 50)),
+    "injection.indirect": ProbeExecutionManifest(
+        ("INJ-009", "INJ-013", "INJ-025", "INJ-026", "INJ-032", "INJ-038", "INJ-048"),
+        required_target_capabilities=("processes_untrusted_content",),
+    ),
+    "injection.encoding": ProbeExecutionManifest(
+        ("INJ-029", "INJ-031", "INJ-042", "INJ-043", "INJ-047", "INJ-049"),
+    ),
+    "injection.multilingual": ProbeExecutionManifest(("INJ-009", "INJ-034", "INJ-043")),
+    "injection.split": ProbeExecutionManifest(
+        ("SPI-001", "SPI-002", "SPI-003", "SPI-004"),
+        request_cost=5,
+    ),
+    "extraction.translation": ProbeExecutionManifest(("EXT-006", "EXT-007")),
+    "extraction.role_confusion": ProbeExecutionManifest(
+        ("EXT-001", "EXT-002", "EXT-003", "EXT-004", "EXT-005", "EXT-013", "EXT-017", "EXT-020"),
+    ),
+    "extraction.simulation": ProbeExecutionManifest(_ids("EXT", 8, 12) + ("EXT-018", "EXT-019")),
+    "extraction.gradient_walk": ProbeExecutionManifest(("EXT-GRAD-001",), request_cost=8),
+    "guardrails.roleplay": ProbeExecutionManifest(_ids("GRD", 1, 8) + ("GRD-016", "GRD-017")),
+    "guardrails.logic_trap": ProbeExecutionManifest(_ids("GRD", 11, 15)),
+    "guardrails.encoding_bypass": ProbeExecutionManifest(
+        ("GRD-009", "GRD-010", "GRD-018", "GRD-019", "GRD-020"),
+    ),
+    "guardrails.systematic": ProbeExecutionManifest(
+        ("GRD-GRAD-001", "GRD-GRAD-002"), request_cost=9
+    ),
+    "toolabuse.ssrf": ProbeExecutionManifest(
+        ("TOOL-001", "TOOL-002", "TOOL-003", "TOOL-004", "TOOL-005", "TOOL-016", "TOOL-017"),
+        required_target_capabilities=("tool_calling", "network_tool"),
+        safety_classification="isolated-only",
+    ),
+    "toolabuse.sqli": ProbeExecutionManifest(
+        ("TOOL-006", "TOOL-007", "TOOL-008", "TOOL-009", "TOOL-020"),
+        required_target_capabilities=("tool_calling", "database_tool"),
+        safety_classification="isolated-only",
+    ),
+    "toolabuse.command_injection": ProbeExecutionManifest(
+        ("TOOL-010", "TOOL-011", "TOOL-012", "TOOL-013", "TOOL-018"),
+        required_target_capabilities=("tool_calling", "code_or_shell_tool"),
+        safety_classification="isolated-only",
+    ),
+    "toolabuse.chained": ProbeExecutionManifest(
+        ("TOOL-014", "TOOL-015", "TOOL-019"),
+        required_target_capabilities=("tool_calling", "multiple_tools"),
+        request_cost=2,
+        safety_classification="isolated-only",
+    ),
+    "rag.poisoning": ProbeExecutionManifest(
+        ("RAG-001", "RAG-002", "RAG-003", "RAG-004"),
+        required_target_capabilities=("retrieval_augmented_generation",),
+    ),
+    "rag.document_injection": ProbeExecutionManifest(
+        ("RAG-004", "RAG-005"),
+        required_target_capabilities=("retrieval_augmented_generation", "document_ingestion"),
+    ),
+    "exfil.rag_data": ProbeExecutionManifest(
+        ("EXFIL-007", "EXFIL-008", "EXFIL-009", "EXFIL-015", "RAG-006", "RAG-007", "RAG-008"),
+        required_target_capabilities=("retrieval_augmented_generation",),
+    ),
+    "exfil.tool_schema": ProbeExecutionManifest(
+        ("EXFIL-010", "EXFIL-011", "EXFIL-012"),
+        required_target_capabilities=("tool_calling",),
+    ),
+    "exfil.training_data": ProbeExecutionManifest(_ids("EXFIL", 1, 6) + ("EXFIL-013", "EXFIL-014")),
+    "dos.loop_trigger": ProbeExecutionManifest(
+        ("DOS-001", "DOS-003", "DOS-006", "DOS-010", "DOS-014", "DOS-018", "DOS-022", "DOS-024"),
+        safety_classification="resource-intensive",
+    ),
+    "dos.token_exhaustion": ProbeExecutionManifest(
+        ("DOS-002", "DOS-004", "DOS-005", "DOS-009", "DOS-013", "DOS-015", "DOS-021", "DOS-023"),
+        safety_classification="resource-intensive",
+    ),
+    "dos.context_bomb": ProbeExecutionManifest(
+        ("DOS-002", "DOS-005", "DOS-013", "DOS-015", "DOS-019", "DOS-027"),
+        safety_classification="resource-intensive",
+    ),
+    "multiturn.escalation": ProbeExecutionManifest(
+        ("MTR-001", "MTR-002", "MTR-004"), request_cost=5
+    ),
+    "multiturn.persona_lock": ProbeExecutionManifest(
+        ("MTR-003",),
+        request_cost=5,
+    ),
+    "multiturn.memory_manipulation": ProbeExecutionManifest(
+        ("MTR-005", "MTR-006", "MTR-007"),
+        request_cost=1,
+    ),
+    "multiturn.cultivation": ProbeExecutionManifest(_ids("MTC", 1, 13), request_cost=8),
+    "multiturn.sycophancy": ProbeExecutionManifest(
+        _ids("MTS", 1, 5),
+        request_cost=6,
+    ),
+    "multiturn.authority_escalation": ProbeExecutionManifest(
+        _ids("MTA", 1, 8),
+        request_cost=6,
+    ),
+    "rag.knowledge_enum": ProbeExecutionManifest(
+        ("RAG-006", "RAG-007", "RAG-008"),
+        required_target_capabilities=("retrieval_augmented_generation",),
+    ),
+    "multimodal.injection": ProbeExecutionManifest(
+        _ids("MM", 1, 20),
+        required_target_capabilities=("vision",),
+    ),
+}
 
 
 _RESEARCH_MODULES = {
@@ -220,6 +355,8 @@ class BasiliskAttack(ABC):
     and generate_payloads() to produce attack payloads from YAML databases.
     """
 
+    probe_filter: tuple[str, ...] = ()
+
     @property
     @abstractmethod
     def name(self) -> str:
@@ -337,6 +474,26 @@ class BasiliskAttack(ABC):
         ]
 
     @property
+    def probe_manifest(self) -> ProbeExecutionManifest:
+        return _MODULE_PROBE_MANIFESTS.get(self.name, ProbeExecutionManifest(()))
+
+    @property
+    def applicable_probe_ids(self) -> list[str]:
+        return list(self.probe_manifest.probe_ids)
+
+    @property
+    def expected_false_positives(self) -> list[str]:
+        return list(self.probe_manifest.expected_false_positives)
+
+    @property
+    def request_cost(self) -> int:
+        return self.probe_manifest.request_cost
+
+    @property
+    def safety_classification(self) -> str:
+        return self.probe_manifest.safety_classification
+
+    @property
     def requires_tool_proof(self) -> bool:
         return "toolabuse" in self.name
 
@@ -366,10 +523,18 @@ class BasiliskAttack(ABC):
 
     def generate_payloads(self) -> list[str]:
         """
-        Generate attack payloads for this module.
-        Can be overridden by subclasses to provide dynamic or file-based payloads.
+        Resolve this module's test data exclusively from the canonical YAML corpus.
         """
-        return []
+        return [probe.payload for probe in self.canonical_probes()]
+
+    def canonical_probes(self):
+        from basilisk.payloads.loader import load_probes_by_id
+
+        selected = list(self.applicable_probe_ids)
+        if self.probe_filter:
+            allowed = set(self.probe_filter)
+            selected = [probe_id for probe_id in selected if probe_id in allowed]
+        return load_probes_by_id(selected, strict=True)
 
     def load_payloads(self, yaml_path: str | Path) -> list[dict[str, Any]]:
         """Load payloads from a YAML file."""
@@ -524,7 +689,7 @@ class BasiliskAttack(ABC):
             description=description,
             severity=severity or self.severity_default,
             category=self.category,
-            attack_module=f"basilisk.attacks.{self.name}",
+            attack_module=self.name,
             payload=payload,
             response=response,
             conversation=conversation or [
@@ -540,12 +705,25 @@ class BasiliskAttack(ABC):
         finding.metadata = {
             **finding.metadata,
             "module_trust_tier": self.trust_tier,
+            "implementation_module": self.__class__.__module__,
             "module_success_criteria": self.success_criteria,
             "module_evidence_requirements": self.evidence_requirements,
             "evidence_confidence_basis": evidence.confidence_basis,
             "requires_tool_proof": self.requires_tool_proof,
             "supports_baseline_differential": self.supports_baseline_differential,
+            "applicable_probe_ids": self.applicable_probe_ids,
+            "expected_false_positives": self.expected_false_positives,
+            "request_cost": self.request_cost,
+            "safety_classification": self.safety_classification,
         }
+        from basilisk.core.reproducibility import finding_reproducibility
+
+        finding.metadata["reproducibility"] = finding_reproducibility(
+            module=self.name,
+            payload=payload,
+            response=response,
+            provider_response=provider_response,
+        )
         return finding
 
     def create_finding_with_baseline(
@@ -772,6 +950,13 @@ def describe_attack_module(attack: BasiliskAttack) -> AttackModuleDescriptor:
         requires_tool_proof=attack.requires_tool_proof,
         supports_baseline_differential=attack.supports_baseline_differential,
         is_multiturn="multiturn" in attack.name,
+        applicable_probe_ids=attack.applicable_probe_ids,
+        preconditions=list(attack.probe_manifest.preconditions),
+        required_target_capabilities=list(attack.probe_manifest.required_target_capabilities),
+        verification_steps=attack.default_replay_steps,
+        expected_false_positives=attack.expected_false_positives,
+        request_cost=attack.request_cost,
+        safety_classification=attack.safety_classification,
     )
 
 

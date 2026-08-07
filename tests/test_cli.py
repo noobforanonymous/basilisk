@@ -4,10 +4,23 @@ Tests for Basilisk CLI commands.
 
 from __future__ import annotations
 
-import pytest
 from click.testing import CliRunner
 
+from basilisk.cli.encoding import configure_output_encoding
 from basilisk.cli.main import cli
+
+
+def test_windows_console_streams_are_reconfigured_for_unicode_output():
+    class ReconfigurableStream:
+        def __init__(self):
+            self.options = None
+
+        def reconfigure(self, **options):
+            self.options = options
+
+    stream = ReconfigurableStream()
+    configure_output_encoding(platform="win32", streams=[stream])
+    assert stream.options == {"encoding": "utf-8", "errors": "replace"}
 
 
 class TestCLI:
@@ -60,7 +73,22 @@ class TestCLI:
     def test_scan_requires_target(self):
         result = self.runner.invoke(cli, ["scan"])
         assert result.exit_code != 0
-        assert "Missing" in result.output or "required" in result.output.lower()
+
+    def test_scan_cost_preview_exits_without_worker_or_credentials(self, monkeypatch):
+        def forbidden_worker(_payload):
+            raise AssertionError("cost preview must not spawn a scan worker")
+
+        monkeypatch.setattr("basilisk.runtime.isolation.spawn_restricted_scan", forbidden_worker)
+        result = self.runner.invoke(cli, [
+            "scan", "-t", "https://example.test", "--cost-preview",
+            "--mode", "quick", "--module", "injection.direct",
+            "--probe-id", "INJ-001", "--skip-recon", "--no-evolve",
+        ])
+        assert result.exit_code == 0
+        assert "Scan Cost Preview" in result.output
+        assert "Hard request ceiling" in result.output
+        assert "Provider cost estimate" in result.output
+        assert "Unavailable until provider/model token rates are" in result.output
 
     def test_recon_requires_target(self):
         result = self.runner.invoke(cli, ["recon"])
@@ -81,3 +109,14 @@ class TestCLI:
         )
         assert result.exit_code != 0
         assert "no longer accepts inline secret values" in result.output
+
+    def test_scan_propagates_runtime_exit_code(self, monkeypatch):
+        async def fake_run_scan(**kwargs):
+            return 7
+
+        monkeypatch.setattr("basilisk.cli.scan.run_scan", fake_run_scan)
+        result = self.runner.invoke(
+            cli,
+            ["scan", "-t", "https://example.test", "--no-evolve"],
+        )
+        assert result.exit_code == 7

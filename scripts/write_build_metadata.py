@@ -56,6 +56,16 @@ def build_metadata(platform: str) -> dict:
     }
 
 
+def enforce_release_trust(metadata: dict) -> None:
+    if not _bool_env("BASILISK_REQUIRE_VENDOR_TRUST"):
+        return
+    platform = str(metadata.get("platform", "")).lower()
+    if platform == "windows" and not metadata.get("vendor_signed"):
+        raise SystemExit("Release blocked: WINDOWS_SIGNING_CERT_BASE64 is required for tagged Windows builds")
+    if platform == "macos" and not (metadata.get("vendor_signed") and metadata.get("notarized")):
+        raise SystemExit("Release blocked: macOS Developer ID signing and notarization credentials are required")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Write Basilisk desktop build trust metadata")
     parser.add_argument("--platform", required=True)
@@ -65,6 +75,7 @@ def main() -> int:
     args = parser.parse_args()
 
     metadata = build_metadata(args.platform)
+    enforce_release_trust(metadata)
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(metadata, indent=2), "utf-8")

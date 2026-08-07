@@ -19,6 +19,7 @@ For provider-backed scans, Basilisk expects credentials through environment vari
 - `GH_MODELS_TOKEN`
 - `GROQ_API_KEY`
 - `XAI_API_KEY`
+- `NVIDIA_API_KEY`
 
 You can also pass a file path with `@/path/to/file` to `--api-key`. Inline secrets are intentionally rejected because they leak into shell history and process listings.
 
@@ -80,6 +81,24 @@ What this does:
 4. runs attacks and optional evolution
 5. writes a report to `./basilisk-reports`
 6. stores session data in `./basilisk-sessions.db`
+
+NVIDIA API Catalog uses its OpenAI-compatible endpoint directly:
+
+```bash
+export NVIDIA_API_KEY="nvapi-..."
+
+basilisk scan \
+  --target https://integrate.api.nvidia.com/v1 \
+  --provider nvidia \
+  --model openai/gpt-oss-20b
+```
+
+The key is read from `NVIDIA_API_KEY`; do not paste it into the command line.
+
+The CLI launches the scan in a restricted worker process. The selected mode
+sets its wall-time, CPU, memory, file-size, open-file, and child-process
+ceilings. Target URLs are still checked by the outbound destination policy
+inside the worker, including DNS and private-address restrictions.
 
 ## Choosing a Scan Mode
 
@@ -214,16 +233,18 @@ basilisk help examples
 
 ### Passing secrets inline
 
-Do not do this:
+Do not pass API keys or bearer headers inline:
 
 ```bash
 basilisk scan --api-key sk-...
+basilisk scan --auth "Bearer token..."
 ```
 
 Use an environment variable or a file reference:
 
 ```bash
 basilisk scan --api-key @/path/to/key.txt
+BASILISK_AUTH_HEADER="Bearer token..." basilisk scan --target https://example.test/v1/chat/completions --provider custom
 ```
 
 ### Mixing scan mode and execution mode

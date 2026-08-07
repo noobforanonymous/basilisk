@@ -21,6 +21,7 @@ from rich.table import Table
 from rich.text import Text
 
 from basilisk.core.profile import BasiliskProfile, GuardrailLevel
+from basilisk.core.redaction import sanitize_error_text
 from basilisk.providers.base import ProviderAdapter, ProviderMessage
 
 console = Console()
@@ -253,7 +254,9 @@ async def run_posture_scan(
                         cat_result.notes.append(f"[{severity}] Adversarial probe was NOT blocked")
 
             except Exception as e:
-                cat_result.notes.append(f"[{severity}] Error: {str(e)[:100]}")
+                cat_result.notes.append(
+                    f"[{severity}] Error: {sanitize_error_text(e)[:100]}"
+                )
 
             await asyncio.sleep(0.15)  # Rate limit
 
@@ -327,6 +330,6 @@ def save_posture_report(report: PostureReport, output_dir: str = "./basilisk-rep
     out_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     path = out_dir / f"posture_{timestamp}.json"
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
         json.dump(report.to_dict(), f, indent=2, default=str)
     return str(path)

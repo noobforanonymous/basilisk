@@ -95,7 +95,7 @@ $PYTHON scripts/write_build_metadata.py --platform "$PLATFORM_NAME" --output des
 echo ""
 echo "[5/5] Building Electron desktop app..."
 cd desktop
-npm install
+npm ci
 
 PLATFORM="${1:-}"
 case "$PLATFORM" in

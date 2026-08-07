@@ -9,10 +9,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 
 from basilisk.core.profile import BasiliskProfile, DetectedTool
 from basilisk.providers.base import ProviderAdapter, ProviderMessage
+
+logger = logging.getLogger("basilisk.recon.tools")
 
 
 TOOL_DISCOVERY_PROBES = [
@@ -97,7 +100,10 @@ async def discover_tools(
                                 "arguments": tc.get("function", {}).get("arguments", "{}")
                             })
                 return results
+        except asyncio.CancelledError:
+            raise
         except Exception:
+            logger.exception("Unexpected failure during tool-discovery probe")
             return None
 
     probe_results = await asyncio.gather(*(run_probe(p) for p in TOOL_DISCOVERY_PROBES))
@@ -113,7 +119,13 @@ async def discover_tools(
                 if tool_name not in seen_tools:
                     seen_tools.add(tool_name)
                     raw_args = tc["arguments"]
-                    parsed_args = raw_args if isinstance(raw_args, dict) else json.loads(raw_args)
+                    if isinstance(raw_args, dict):
+                        parsed_args = raw_args
+                    else:
+                        try:
+                            parsed_args = json.loads(raw_args)
+                        except (TypeError, json.JSONDecodeError):
+                            parsed_args = {"unparsed_arguments": str(raw_args)[:512]}
                     detected.append(DetectedTool(
                         name=tool_name,
                         description=f"Discovered via direct tool call",

@@ -1,17 +1,9 @@
 {
   "version": 1,
   "libraries": {
-    "libbasilisk_encoder.so": {
-      "sha256": "f12c11cc516bb898ba279c0ffb62ef82b080e8aaee7bf629f2225412b4bcdfc8"
-    },
-    "libbasilisk_fuzzer.so": {
-      "sha256": "914af48a0bca6511e2bcf341fc701d8a96e97aa689c8478346d1b7e66856fc7f"
-    },
-    "libbasilisk_matcher.so": {
-      "sha256": "0ad347d724b959cbe137b776924678d0a2ad5777db3ee4bfef4d358db1763463"
-    },
-    "libbasilisk_tokens.so": {
-      "sha256": "120e4cd22ab15822607588287e1bfa97ba509294e144e20f3d2b1055969d05a4"
-    }
+    "libbasilisk_encoder.dll": {"sha256": "50e4ba3289adbe5f11e70979844291c7bdc134be2e55d55f45596b8646ea7173"},
+    "libbasilisk_fuzzer.dll": {"sha256": "2559beb26ddd110c73280a9d643e9b15de541c1b9ae63d5f05766c447cc47b91"},
+    "libbasilisk_matcher.dll": {"sha256": "ba0eb682bc6c2957a9677028ed0fe1d06b42a20c1d86b337ce7089336e4dd2cc"},
+    "libbasilisk_tokens.dll": {"sha256": "816ab90a4da0522d46149f0ed8a9c8a9de049415265070dec39b2a6e42f7d00c"}
   }
 }

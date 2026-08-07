@@ -51,9 +51,10 @@ async def run_recon_standalone(
     async with _create_provider(cfg) as prov:
         # Health check
         console.print("[dim]Checking provider connection...[/dim]")
-        healthy = await prov.health_check()
+        healthy, health_error = await prov.health_check()
         if not healthy:
-            console.print("[red]✗ Provider health check failed.[/red]")
+            detail = f" ({health_error})" if health_error else ""
+            console.print(f"[red]✗ Provider health check failed{detail}.[/red]")
             return
         console.print("[green]✓[/green] Provider connected\n")
 

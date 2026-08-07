@@ -85,7 +85,9 @@ class EvalTarget:
     def resolve_api_key(self) -> str:
         """Resolve API key from config or environment."""
         if self.api_key:
-            return self.api_key
+            from basilisk.core.config import _resolve_secret_reference
+
+            return _resolve_secret_reference(self.api_key, purpose="eval API key")
         env_mapping = {
             "openai": "OPENAI_API_KEY",
             "anthropic": "ANTHROPIC_API_KEY",
@@ -94,6 +96,7 @@ class EvalTarget:
             "github": "GH_MODELS_TOKEN",
             "groq": "GROQ_API_KEY",
             "xai": "XAI_API_KEY",
+            "nvidia": "NVIDIA_API_KEY",
         }
         env_var = env_mapping.get(self.provider, "BASILISK_API_KEY")
         return os.environ.get(env_var, "")
@@ -188,6 +191,17 @@ def load_eval_config(path: str | Path) -> EvalConfig:
         raise FileNotFoundError(f"Eval config not found: {path}")
 
     raw_text = path.read_text("utf-8")
+    unresolved_data = yaml.safe_load(raw_text)
+    unresolved_target = (
+        unresolved_data.get("target", {})
+        if isinstance(unresolved_data, dict)
+        else {}
+    )
+    unresolved_api_key = str(unresolved_target.get("api_key", ""))
+    if unresolved_api_key and not unresolved_api_key.startswith(("@", "$")):
+        raise ValueError(
+            "Inline eval API keys are not accepted; use $ENV, ${ENV}, or @file."
+        )
     resolved = _resolve_env_vars(raw_text)
     data = yaml.safe_load(resolved)
 
@@ -199,7 +213,7 @@ def load_eval_config(path: str | Path) -> EvalConfig:
     target = EvalTarget(
         provider=target_raw.get("provider", "openai"),
         model=target_raw.get("model", ""),
-        api_key=target_raw.get("api_key", ""),
+        api_key=unresolved_api_key,
         api_base=target_raw.get("api_base", ""),
         auth=target_raw.get("auth", ""),
     )

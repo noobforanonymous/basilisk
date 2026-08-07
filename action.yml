@@ -11,7 +11,7 @@ inputs:
     description: 'Target URL or API endpoint to scan'
     required: true
   provider:
-    description: 'LLM provider (openai, anthropic, google, azure, ollama, github, custom)'
+    description: 'LLM provider (openai, anthropic, google, azure, nvidia, ollama, github, custom, websocket)'
     required: false
     default: 'openai'
   model:
@@ -70,22 +70,28 @@ inputs:
 outputs:
   exit-code:
     description: 'Scan exit code (0 = pass, 1 = fail)'
+    value: ${{ steps.results.outputs.exit-code }}
   findings-count:
     description: 'Total number of findings'
+    value: ${{ steps.results.outputs.findings-count }}
   critical-count:
     description: 'Number of critical findings'
+    value: ${{ steps.results.outputs.critical-count }}
   high-count:
     description: 'Number of high findings'
+    value: ${{ steps.results.outputs.high-count }}
   report-path:
     description: 'Path to the generated report'
+    value: ${{ steps.results.outputs.report-path }}
   posture-grade:
     description: 'Guardrail posture grade (A+ through F), only for posture-only mode'
+    value: ${{ steps.results.outputs.posture-grade }}
 
 runs:
   using: 'composite'
   steps:
     - name: Setup Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
       with:
         python-version: '3.11'
 
@@ -93,105 +99,151 @@ runs:
       shell: bash
       run: |
         if [ -f "${{ github.action_path }}/pyproject.toml" ]; then
-          pip install --quiet "${{ github.action_path }}"
+          python -m pip install --quiet -r "${{ github.action_path }}/requirements.lock"
+          python -m pip install --quiet --no-deps "${{ github.action_path }}"
         else
-          pip install --quiet basilisk-ai
+          python -m pip install --quiet basilisk-ai==2.0.0
         fi
 
     - name: Run Posture Scan
+      id: posture
       if: inputs.posture-only == 'true'
+      continue-on-error: true
       shell: bash
       env:
         OPENAI_API_KEY: ${{ inputs.api-key }}
         ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key || inputs.api-key }}
         GOOGLE_API_KEY: ${{ inputs.google-api-key || inputs.api-key }}
+        NVIDIA_API_KEY: ${{ inputs.api-key }}
         GH_MODELS_TOKEN: ${{ inputs.github-token }}
         BASILISK_API_KEY: ${{ inputs.api-key }}
+        BASILISK_TARGET: ${{ inputs.target }}
+        BASILISK_PROVIDER: ${{ inputs.provider }}
+        BASILISK_MODEL: ${{ inputs.model }}
       run: |
-        basilisk posture \
-          -t "${{ inputs.target }}" \
-          -p "${{ inputs.provider }}" \
-          --output-dir ./basilisk-reports \
+        set +e
+        command=(
+          basilisk posture
+          -t "$BASILISK_TARGET"
+          -p "$BASILISK_PROVIDER"
+          --output-dir ./basilisk-reports
           --json
+        )
+        if [[ -n "$BASILISK_MODEL" ]]; then
+          command+=(-m "$BASILISK_MODEL")
+        fi
+        "${command[@]}"
+        status=$?
+        set -e
+        echo "exit-code=$status" >> "$GITHUB_OUTPUT"
+        exit "$status"
 
     - name: Run Security Scan
+      id: scan
       if: inputs.posture-only != 'true'
+      continue-on-error: true
       shell: bash
       env:
         OPENAI_API_KEY: ${{ inputs.api-key }}
         ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key || inputs.api-key }}
         GOOGLE_API_KEY: ${{ inputs.google-api-key || inputs.api-key }}
+        NVIDIA_API_KEY: ${{ inputs.api-key }}
         GH_MODELS_TOKEN: ${{ inputs.github-token }}
         BASILISK_API_KEY: ${{ inputs.api-key }}
+        BASILISK_TARGET: ${{ inputs.target }}
+        BASILISK_PROVIDER: ${{ inputs.provider }}
+        BASILISK_MODEL: ${{ inputs.model }}
+        BASILISK_MODE: ${{ inputs.mode }}
+        BASILISK_FAIL_ON: ${{ inputs.fail-on }}
+        BASILISK_OUTPUT: ${{ inputs.output }}
+        BASILISK_MODULES: ${{ inputs.modules }}
+        BASILISK_EVOLVE: ${{ inputs.evolve }}
+        BASILISK_GENERATIONS: ${{ inputs.generations }}
       run: |
-        MODULES_FLAG=""
-        if [ -n "${{ inputs.modules }}" ]; then
-          IFS=',' read -ra MODS <<< "${{ inputs.modules }}"
-          for mod in "${MODS[@]}"; do
-            MODULES_FLAG="$MODULES_FLAG --module $mod"
+        if [[ ! "$BASILISK_GENERATIONS" =~ ^[1-9][0-9]*$ ]]; then
+          echo "generations must be a positive integer" >&2
+          echo "exit-code=2" >> "$GITHUB_OUTPUT"
+          exit 2
+        fi
+
+        command=(
+          basilisk scan
+          -t "$BASILISK_TARGET"
+          -p "$BASILISK_PROVIDER"
+          --mode "$BASILISK_MODE"
+          --fail-on "$BASILISK_FAIL_ON"
+          -o "$BASILISK_OUTPUT"
+          --output-dir ./basilisk-reports
+          --no-dashboard
+          --generations "$BASILISK_GENERATIONS"
+        )
+        if [[ -n "$BASILISK_MODEL" ]]; then
+          command+=(-m "$BASILISK_MODEL")
+        fi
+        if [[ "$BASILISK_EVOLVE" == "true" ]]; then
+          command+=(--evolve)
+        else
+          command+=(--no-evolve)
+        fi
+        if [[ -n "$BASILISK_MODULES" ]]; then
+          IFS=',' read -ra modules <<< "$BASILISK_MODULES"
+          for module in "${modules[@]}"; do
+            module="${module#"${module%%[![:space:]]*}"}"
+            module="${module%"${module##*[![:space:]]}"}"
+            if [[ -n "$module" ]]; then
+              command+=(--module "$module")
+            fi
           done
         fi
 
-        EVOLVE_FLAG="--no-evolve"
-        if [ "${{ inputs.evolve }}" == "true" ]; then
-          EVOLVE_FLAG="--evolve"
-        fi
-
-        basilisk scan \
-          -t "${{ inputs.target }}" \
-          -p "${{ inputs.provider }}" \
-          ${{ inputs.model && format('-m "{0}"', inputs.model) || '' }} \
-          --mode "${{ inputs.mode }}" \
-          --fail-on "${{ inputs.fail-on }}" \
-          -o "${{ inputs.output }}" \
-          --output-dir ./basilisk-reports \
-          --no-dashboard \
-          $EVOLVE_FLAG \
-          --generations ${{ inputs.generations }} \
-          $MODULES_FLAG
+        set +e
+        "${command[@]}"
+        status=$?
+        set -e
+        echo "exit-code=$status" >> "$GITHUB_OUTPUT"
+        report=$(python3 -c 'from pathlib import Path; files=[p for p in Path("basilisk-reports").glob("*") if p.is_file() and not p.name.startswith("audit_")]; print(max(files, key=lambda p: p.stat().st_mtime) if files else "")')
+        echo "report-path=${report:-}" >> "$GITHUB_OUTPUT"
+        exit "$status"
 
     - name: Check Regression Against Baseline
+      id: regression
       if: inputs.baseline != '' && inputs.posture-only != 'true'
+      continue-on-error: true
       shell: bash
+      env:
+        BASILISK_BASELINE: ${{ inputs.baseline }}
+        BASILISK_REPORT: ${{ steps.scan.outputs.report-path }}
       run: |
         echo "Checking for regressions against baseline..."
-        REPORT=$(ls -t ./basilisk-reports/*.sarif 2>/dev/null | head -1)
-        if [ -n "$REPORT" ] && [ -f "${{ inputs.baseline }}" ]; then
-          python3 -c "
-        import json, sys
-
-        with open('${{ inputs.baseline }}') as f:
-            baseline = json.load(f)
-        with open('$REPORT') as f:
-            current = json.load(f)
-
-        baseline_ids = set()
-        for run in baseline.get('runs', []):
-            for result in run.get('results', []):
-                baseline_ids.add(result.get('ruleId', ''))
-
-        new_findings = []
-        for run in current.get('runs', []):
-            for result in run.get('results', []):
-                if result.get('ruleId', '') not in baseline_ids:
-                    new_findings.append(result)
-
-        if new_findings:
-            print(f'🔴 REGRESSION: {len(new_findings)} new finding(s) not in baseline!')
-            for f in new_findings:
-                level = f.get('level', 'warning')
-                rule = f.get('ruleId', 'unknown')
-                msg = f.get('message', {}).get('text', '')[:100]
-                print(f'  [{level}] {rule}: {msg}')
-            sys.exit(1)
-        else:
-            print('🟢 No regressions detected.')
-        "
+        if [[ -z "$BASILISK_REPORT" || ! -f "$BASILISK_REPORT" ]]; then
+          echo "Current SARIF report was not generated." >&2
+          exit 2
         fi
+        if [[ "$BASILISK_REPORT" != *.sarif ]]; then
+          echo "Baseline comparison requires output: sarif." >&2
+          exit 2
+        fi
+        if [[ ! -f "$BASILISK_BASELINE" ]]; then
+          echo "Baseline SARIF file does not exist: $BASILISK_BASELINE" >&2
+          exit 2
+        fi
+        python3 "$GITHUB_ACTION_PATH/scripts/compare_sarif.py" \
+          "$BASILISK_BASELINE" "$BASILISK_REPORT"
+
+    - name: Collect Action Results
+      id: results
+      if: always()
+      shell: bash
+      env:
+        BASILISK_POSTURE_ONLY: ${{ inputs.posture-only }}
+        BASILISK_SCAN_EXIT: ${{ steps.scan.outputs.exit-code }}
+        BASILISK_POSTURE_EXIT: ${{ steps.posture.outputs.exit-code }}
+        BASILISK_REPORT: ${{ steps.scan.outputs.report-path }}
+      run: python3 "$GITHUB_ACTION_PATH/scripts/action_results.py"
 
     - name: Upload Report
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
       with:
         name: basilisk-report
         path: ./basilisk-reports/
@@ -199,8 +251,21 @@ runs:
 
     - name: Upload SARIF to GitHub Security
       if: inputs.output == 'sarif' && inputs.posture-only != 'true'
-      uses: github/codeql-action/upload-sarif@v4
+      uses: github/codeql-action/upload-sarif@adfda868f108ac4222129de456ea554034a27db7 # v4
       with:
-        sarif_file: ./basilisk-reports/
+        sarif_file: ${{ steps.scan.outputs.report-path }}
         category: basilisk-scan
       continue-on-error: true
+
+    - name: Enforce Scan Result
+      if: always()
+      shell: bash
+      env:
+        BASILISK_EXIT_CODE: ${{ steps.results.outputs.exit-code }}
+        BASILISK_REGRESSION_OUTCOME: ${{ steps.regression.outcome }}
+      run: |
+        if [[ "$BASILISK_REGRESSION_OUTCOME" == "failure" ]]; then
+          echo "Basilisk detected a regression against the supplied baseline." >&2
+          exit 1
+        fi
+        exit "${BASILISK_EXIT_CODE:-1}"

@@ -31,6 +31,7 @@ async def run_scan(
     evolve: bool = True,
     generations: int = 5,
     module: list[str] | None = None,
+    probe_id: list[str] | None = None,
     recon_module: list[str] | None = None,
     output_format: str = "html",
     output_dir: str = "./basilisk-reports",
@@ -54,6 +55,14 @@ async def run_scan(
     approval_required: bool = False,
     approved: bool = False,
     dry_run: bool = False,
+    max_findings: int = 0,
+    stop_on_severity: str = "",
+    allow_private_targets: bool = False,
+    allow_insecure_http: bool = False,
+    isolated_environment: bool = False,
+    cost_preview_only: bool = False,
+    input_price_per_million: float | None = None,
+    output_price_per_million: float | None = None,
     config: str = "",
 ) -> int:
     """Main scan execution pipeline."""
@@ -62,7 +71,7 @@ async def run_scan(
 
     cfg = BasiliskConfig.from_cli_args(
         target=target, provider=provider, model=model, api_key=api_key, auth=auth, mode=mode, evolve=evolve, generations=generations,
-        module=module, recon_module=recon_module, 
+        module=module, probe_id=probe_id, recon_module=recon_module,
         attacker_provider=attacker_provider, attacker_model=attacker_model,
         attacker_api_key=attacker_api_key, 
         campaign={
@@ -79,14 +88,46 @@ async def run_scan(
             "approval_required": approval_required,
             "approval_confirmed": approved,
             "dry_run": dry_run,
+            "stop_on_severity": stop_on_severity,
+            "allow_private_targets": allow_private_targets,
+            "allow_insecure_http": allow_insecure_http,
+            "isolated_environment": isolated_environment,
         },
         exit_on_first=exit_on_first, diversity_mode=diversity_mode,
         intent_weight=intent_weight, enable_cache=enable_cache,
         include_research_modules=include_research_modules,
         output=output_format, 
         output_dir=output_dir, no_dashboard=no_dashboard, fail_on=fail_on, 
+        max_findings=max_findings,
         verbose=verbose, debug=debug, skip_recon=skip_recon, config=config,
     )
+
+    preview = cfg.cost_preview(
+        input_usd_per_million=input_price_per_million,
+        output_usd_per_million=output_price_per_million,
+    )
+    cost_text = (
+        f"${preview.estimated_cost_usd:.6f} USD"
+        if preview.estimated_cost_usd is not None
+        else "Unavailable until provider/model token rates are supplied"
+    )
+    console.print(Panel(
+        f"[bold]Mode:[/bold] {preview.mode}\n"
+        f"[bold]Modules:[/bold] {preview.module_count}\n"
+        f"[bold]Probe executions:[/bold] {preview.probe_executions}\n"
+        f"[bold]Planned requests:[/bold] {preview.estimated_requests} "
+        f"(uncapped estimate {preview.uncapped_request_estimate})\n"
+        f"[bold]Hard request ceiling:[/bold] {preview.request_maximum}\n"
+        f"[bold]Estimated tokens:[/bold] {preview.estimated_input_tokens:,} input / "
+        f"{preview.estimated_output_tokens:,} output\n"
+        f"[bold]Provider cost estimate:[/bold] {cost_text}\n"
+        f"[dim]{preview.cost_basis}[/dim]",
+        title="Scan Cost Preview",
+        border_style="yellow",
+        padding=(1, 2),
+    ))
+    if cost_preview_only:
+        return 0
 
     audit = AuditLogger(
         output_dir=output_dir,
@@ -104,7 +145,7 @@ async def run_scan(
     await session.initialize()
     modules_for_run = resolve_attack_modules(
         selected=cfg.modules,
-        include_research=cfg.include_research_modules,
+        include_research=cfg.research_modules_enabled,
     )
 
     console.print(Panel(
@@ -112,8 +153,11 @@ async def run_scan(
         f"[bold]Target:[/bold] {cfg.target.url}\n"
         f"[bold]Mode:[/bold] {cfg.mode.value}\n"
         f"[bold]Modules:[/bold] {len(modules_for_run)}\n"
-        f"[bold]Research Tier:[/bold] {'Enabled' if cfg.include_research_modules else 'Excluded by default'}\n"
-        f"[bold]Evolution:[/bold] {'Enabled' if cfg.evolution.enabled else 'Disabled'}",
+        f"[bold]Research Tier:[/bold] {'Enabled' if cfg.research_modules_enabled else 'Excluded by default'}\n"
+        f"[bold]Evolution:[/bold] {'Enabled' if cfg.evolution.enabled else 'Disabled'}\n"
+        f"[bold]Request Ceiling:[/bold] {cfg.request_policy().max_requests} actual API calls\n"
+        f"[bold]Input Token Ceiling:[/bold] {cfg.request_policy().max_input_tokens:,}\n"
+        f"[bold]Output Token Ceiling:[/bold] {cfg.request_policy().max_output_tokens:,}",
         title="⚔️  Basilisk Scan Started",
         border_style="red",
         padding=(1, 2),
@@ -157,6 +201,8 @@ async def run_scan(
             audit=audit,
             modules=modules_for_run,
         )
+        # Reports must describe terminal state, not a still-running session.
+        await session.close("completed")
         console.print("[green]✓[/green] Scan pipeline completed")
 
         console.print("\n[bold yellow]Phase 4: Report Generation[/bold yellow]")
@@ -170,7 +216,8 @@ async def run_scan(
         logger.exception("Scan failed")
         console.print(f"[red]✗ Scan failed: {exc}[/red]")
     finally:
-        await session.close(final_status)
+        if session.finished_at is None:
+            await session.close(final_status)
         audit.close()
 
     print_summary(session)
@@ -241,3 +288,30 @@ def _print_findings_table(session: ScanSession) -> None:
     from .utils import print_findings_table
 
     print_findings_table(session)
+
+
+def _print_profile(session: ScanSession) -> None:
+    """Compatibility wrapper used by the interactive CLI."""
+    from .utils import print_profile
+
+    print_profile(session)
+
+
+async def _run_evolution(
+    prov,
+    session: ScanSession,
+    cfg: BasiliskConfig,
+    seed_payload: str = "",
+) -> None:
+    """Run the shared evolution phase for an interactive session."""
+    from basilisk.runtime.orchestrator import ScanHooks, _run_evolution_phase
+
+    attacker = await _run_evolution_phase(
+        prov,
+        session,
+        cfg,
+        hooks=ScanHooks(),
+        seed_payloads=[seed_payload] if seed_payload else None,
+    )
+    if attacker is not None:
+        await attacker.close()

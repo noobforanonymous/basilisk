@@ -10,10 +10,15 @@ from __future__ import annotations
 
 import base64
 import json
-import random
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+from basilisk.evolution.randomness import random
+
+if TYPE_CHECKING:
+    from basilisk.providers.base import ProviderAdapter
 
 
 @dataclass

@@ -9,6 +9,8 @@ severity, and free-text search.
 from __future__ import annotations
 
 import logging
+import hashlib
+from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -18,6 +20,44 @@ import yaml
 logger = logging.getLogger("basilisk.payloads")
 
 PAYLOADS_DIR = Path(__file__).parent
+CORPUS_SCHEMA_VERSION = "3"
+
+
+@dataclass(frozen=True)
+class ProbeMessage:
+    """One immutable role/content item in a fabricated-history probe."""
+
+    role: str
+    content: str
+
+
+@dataclass(frozen=True)
+class ProbeTurn:
+    """One structured turn in a canonical multi-turn probe sequence."""
+
+    content: str
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"content": self.content, **deepcopy(self.metadata)}
+
+
+@dataclass(frozen=True)
+class ProbeSequence:
+    """Structured scenario data used by advanced multi-turn modules."""
+
+    name: str
+    description: str
+    turns: tuple[ProbeTurn, ...]
+    attributes: dict[str, Any] = field(default_factory=dict)
+
+    def to_scenario(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "description": self.description,
+            **deepcopy(self.attributes),
+            "turns": [turn.to_dict() for turn in self.turns],
+        }
 
 
 @dataclass(frozen=True)
@@ -26,6 +66,9 @@ class Probe:
     id: str
     name: str
     payload: str
+    turns: tuple[str, ...] = ()
+    messages: tuple[ProbeMessage, ...] = ()
+    sequence: ProbeSequence | None = None
     signals: list[str] = field(default_factory=list)
     severity: str = "high"
     tags: list[str] = field(default_factory=list)
@@ -41,6 +84,11 @@ class Probe:
     failure_modes: list[str] = field(default_factory=list)
     follow_up_probe_ids: list[str] = field(default_factory=list)
     owasp_id: str = ""
+    verification_steps: list[str] = field(default_factory=list)
+    expected_false_positives: list[str] = field(default_factory=list)
+    request_cost: int = 1
+    safety_classification: str = "bounded"
+    version: str = "1"
 
     def matches_filter(
         self,
@@ -58,7 +106,10 @@ class Probe:
             return False
         if query:
             q = query.lower()
-            searchable = f"{self.id} {self.name} {self.payload}".lower()
+            sequence_text = " ".join(self.turns) + " " + " ".join(
+                message.content for message in self.messages
+            )
+            searchable = f"{self.id} {self.name} {self.payload} {sequence_text}".lower()
             if q not in searchable:
                 return False
         return True
@@ -68,6 +119,12 @@ class Probe:
             "id": self.id,
             "name": self.name,
             "payload": self.payload,
+            "turns": list(self.turns),
+            "messages": [
+                {"role": message.role, "content": message.content}
+                for message in self.messages
+            ],
+            "sequence": self.sequence.to_scenario() if self.sequence else None,
             "signals": self.signals,
             "severity": self.severity,
             "tags": self.tags,
@@ -83,6 +140,11 @@ class Probe:
             "failure_modes": self.failure_modes,
             "follow_up_probe_ids": self.follow_up_probe_ids,
             "owasp_id": self.owasp_id,
+            "verification_steps": self.verification_steps,
+            "expected_false_positives": self.expected_false_positives,
+            "request_cost": self.request_cost,
+            "safety_classification": self.safety_classification,
+            "version": self.version,
         }
 
 
@@ -127,10 +189,20 @@ def _load_file(path: Path) -> list[Probe]:
         if not isinstance(entry, dict):
             continue
         try:
+            sequence = _as_probe_sequence(entry.get("sequence"))
+            simple_turns = tuple(_as_str_list(entry.get("turns", [])))
+            if not simple_turns and sequence:
+                simple_turns = tuple(turn.content for turn in sequence.turns)
+            payload = str(entry.get("payload", ""))
+            if not payload and sequence:
+                payload = sequence.turns[-1].content
             probe = Probe(
                 id=str(entry.get("id", "")),
                 name=str(entry.get("name", "")),
-                payload=str(entry.get("payload", "")),
+                payload=payload,
+                turns=simple_turns,
+                messages=_as_probe_messages(entry.get("messages", [])),
+                sequence=sequence,
                 signals=entry.get("signals", []),
                 severity=str(entry.get("severity", "high")),
                 tags=entry.get("tags", []),
@@ -146,13 +218,70 @@ def _load_file(path: Path) -> list[Probe]:
                 failure_modes=_as_str_list(entry.get("failure_modes", [])),
                 follow_up_probe_ids=_as_str_list(entry.get("follow_up_probe_ids", [])),
                 owasp_id=owasp_id,
+                verification_steps=_as_str_list(entry.get("verification_steps", [])),
+                expected_false_positives=_as_str_list(entry.get("expected_false_positives", [])),
+                request_cost=max(1, int(entry.get("request_cost", 1))),
+                safety_classification=str(entry.get("safety_classification", "bounded")),
+                version=str(entry.get("version", "1")),
             )
-            if probe.id and probe.payload:
+            if probe.id and (probe.payload or probe.turns or probe.messages or probe.sequence):
                 probes.append(probe)
         except Exception as e:
             logger.debug(f"Skipping malformed entry in {path}: {e}")
 
     return probes
+
+
+def _as_probe_messages(value: Any) -> tuple[ProbeMessage, ...]:
+    if not isinstance(value, list):
+        return ()
+    messages: list[ProbeMessage] = []
+    allowed_roles = {"system", "user", "assistant", "tool"}
+    for item in value:
+        if not isinstance(item, dict):
+            raise ValueError("probe messages must contain role/content mappings")
+        role = str(item.get("role", "")).strip().casefold()
+        content = str(item.get("content", ""))
+        if role not in allowed_roles or not content:
+            raise ValueError("probe message role/content is invalid")
+        messages.append(ProbeMessage(role=role, content=content))
+    return tuple(messages)
+
+
+def _as_probe_sequence(value: Any) -> ProbeSequence | None:
+    if value in (None, ""):
+        return None
+    if not isinstance(value, dict):
+        raise ValueError("probe sequence must be a mapping")
+    name = str(value.get("name", "")).strip()
+    description = str(value.get("description", "")).strip()
+    raw_turns = value.get("turns", [])
+    if not name or not description or not isinstance(raw_turns, list) or not raw_turns:
+        raise ValueError("probe sequence requires name, description, and turns")
+    turns: list[ProbeTurn] = []
+    for raw_turn in raw_turns:
+        if not isinstance(raw_turn, dict):
+            raise ValueError("structured probe turns must be mappings")
+        content = str(raw_turn.get("content", ""))
+        if not content:
+            raise ValueError("structured probe turn content is required")
+        metadata = {
+            str(key): deepcopy(item)
+            for key, item in raw_turn.items()
+            if key != "content"
+        }
+        turns.append(ProbeTurn(content=content, metadata=metadata))
+    attributes = {
+        str(key): deepcopy(item)
+        for key, item in value.items()
+        if key not in {"name", "description", "turns"}
+    }
+    return ProbeSequence(
+        name=name,
+        description=description,
+        turns=tuple(turns),
+        attributes=attributes,
+    )
 
 
 # ── Module-level cache ──
@@ -194,6 +323,46 @@ def load_probes(
         return list(_cache)
 
     return [p for p in _cache if p.matches_filter(category, tags, severity, query)]
+
+
+def load_probes_by_id(probe_ids: list[str], *, strict: bool = False) -> list[Probe]:
+    """Resolve stable probe identifiers while preserving the manifest order."""
+    index: dict[str, Probe] = {}
+    duplicates: set[str] = set()
+    for probe in load_probes():
+        if probe.id in index:
+            duplicates.add(probe.id)
+        index[probe.id] = probe
+    if duplicates:
+        raise ValueError(f"Duplicate canonical probe IDs: {', '.join(sorted(duplicates))}")
+    missing = [probe_id for probe_id in probe_ids if probe_id not in index]
+    if strict and missing:
+        raise ValueError(f"Unknown canonical probe IDs: {', '.join(missing)}")
+    return [index[probe_id] for probe_id in probe_ids if probe_id in index]
+
+
+def load_probe_scenarios(probe_ids: list[str]) -> list[dict[str, Any]]:
+    """Return validated structured scenarios for canonical probe identifiers."""
+    probes = load_probes_by_id(probe_ids, strict=True)
+    missing = [probe.id for probe in probes if probe.sequence is None]
+    if missing:
+        raise ValueError(
+            "Canonical probes do not define structured sequences: "
+            + ", ".join(missing)
+        )
+    return [probe.sequence.to_scenario() for probe in probes if probe.sequence]
+
+
+def probe_corpus_version() -> str:
+    """Content-addressed corpus identity for reproducible evidence."""
+    digest = hashlib.sha256()
+    digest.update(f"schema:{CORPUS_SCHEMA_VERSION}\n".encode())
+    for yaml_file in sorted(PAYLOADS_DIR.glob("*.yaml")):
+        digest.update(yaml_file.name.encode())
+        digest.update(b"\0")
+        digest.update(yaml_file.read_bytes())
+        digest.update(b"\0")
+    return f"{CORPUS_SCHEMA_VERSION}-{digest.hexdigest()[:16]}"
 
 
 def probe_stats() -> dict[str, Any]:

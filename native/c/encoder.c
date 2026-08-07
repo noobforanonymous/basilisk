@@ -13,6 +13,7 @@
  */
 
 #include <ctype.h>
+#include <limits.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -26,12 +27,20 @@ static const char B64_TABLE[] =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 char *basilisk_base64_encode(const unsigned char *data, int len) {
-  int out_len = 4 * ((len + 2) / 3);
+  if (len < 0 || (len > 0 && data == NULL))
+    return NULL;
+  size_t input_len = (size_t)len;
+  if (input_len > (SIZE_MAX - 2) / 4 * 3)
+    return NULL;
+  size_t out_len = 4 * ((input_len + 2) / 3);
+  if (out_len > (size_t)INT_MAX || out_len == SIZE_MAX)
+    return NULL;
   char *output = (char *)malloc(out_len + 1);
   if (!output)
     return NULL;
 
-  int i, j;
+  int i;
+  size_t j;
   for (i = 0, j = 0; i < len; i += 3, j += 4) {
     uint32_t n = ((uint32_t)data[i]) << 16;
     if (i + 1 < len)
@@ -63,9 +72,36 @@ static int b64_decode_char(char c) {
 }
 
 unsigned char *basilisk_base64_decode(const char *input, int *out_len) {
-  int in_len = strlen(input);
+  if (!input || !out_len)
+    return NULL;
+  size_t raw_len = strlen(input);
+  if (raw_len > (size_t)INT_MAX)
+    return NULL;
+  int in_len = (int)raw_len;
   if (in_len % 4 != 0)
     return NULL;
+
+  if (in_len == 0) {
+    unsigned char *empty = (unsigned char *)malloc(1);
+    if (!empty)
+      return NULL;
+    empty[0] = '\0';
+    *out_len = 0;
+    return empty;
+  }
+
+  int padding = 0;
+  for (int i = 0; i < in_len; i++) {
+    if (input[i] == '=') {
+      padding++;
+      if (i < in_len - 2 || padding > 2)
+        return NULL;
+    } else if (padding > 0) {
+      return NULL;
+    } else if (b64_decode_char(input[i]) < 0) {
+      return NULL;
+    }
+  }
 
   *out_len = in_len / 4 * 3;
   if (input[in_len - 1] == '=')
@@ -103,7 +139,10 @@ unsigned char *basilisk_base64_decode(const char *input, int *out_len) {
  * ============================================================ */
 
 char *basilisk_hex_encode(const unsigned char *data, int len) {
-  char *output = (char *)malloc(len * 2 + 1);
+  if (len < 0 || (len > 0 && data == NULL) || (size_t)len > (SIZE_MAX - 1) / 2)
+    return NULL;
+  size_t out_len = (size_t)len * 2;
+  char *output = (char *)malloc(out_len + 1);
   if (!output)
     return NULL;
 
@@ -115,16 +154,30 @@ char *basilisk_hex_encode(const unsigned char *data, int len) {
 }
 
 unsigned char *basilisk_hex_decode(const char *input, int *out_len) {
-  int in_len = strlen(input);
+  if (!input || !out_len)
+    return NULL;
+  size_t raw_len = strlen(input);
+  if (raw_len > (size_t)INT_MAX || raw_len % 2 != 0)
+    return NULL;
+  int in_len = (int)raw_len;
   *out_len = in_len / 2;
   unsigned char *output = (unsigned char *)malloc(*out_len + 1);
   if (!output)
     return NULL;
 
   for (int i = 0; i < *out_len; i++) {
-    unsigned int val;
-    sscanf(input + i * 2, "%2x", &val);
-    output[i] = (unsigned char)val;
+    int high = isdigit((unsigned char)input[i * 2])
+                   ? input[i * 2] - '0'
+                   : tolower((unsigned char)input[i * 2]) - 'a' + 10;
+    int low = isdigit((unsigned char)input[i * 2 + 1])
+                  ? input[i * 2 + 1] - '0'
+                  : tolower((unsigned char)input[i * 2 + 1]) - 'a' + 10;
+    if (!isxdigit((unsigned char)input[i * 2]) ||
+        !isxdigit((unsigned char)input[i * 2 + 1])) {
+      free(output);
+      return NULL;
+    }
+    output[i] = (unsigned char)((high << 4) | low);
   }
   output[*out_len] = '\0';
   return output;
@@ -135,6 +188,8 @@ unsigned char *basilisk_hex_decode(const char *input, int *out_len) {
  * ============================================================ */
 
 char *basilisk_rot13(const char *input) {
+  if (!input)
+    return NULL;
   int len = strlen(input);
   char *output = (char *)malloc(len + 1);
   if (!output)
@@ -158,7 +213,11 @@ char *basilisk_rot13(const char *input) {
  * ============================================================ */
 
 char *basilisk_url_encode(const char *input) {
+  if (!input)
+    return NULL;
   int len = strlen(input);
+  if ((size_t)len > (SIZE_MAX - 1) / 3)
+    return NULL;
   // Worst case: every char needs %XX encoding
   char *output = (char *)malloc(len * 3 + 1);
   if (!output)
@@ -185,7 +244,11 @@ char *basilisk_url_encode(const char *input) {
  * ============================================================ */
 
 char *basilisk_unicode_escape(const char *input) {
+  if (!input)
+    return NULL;
   int len = strlen(input);
+  if ((size_t)len > (SIZE_MAX - 1) / 6)
+    return NULL;
   // Each char becomes \uXXXX (6 chars)
   char *output = (char *)malloc(len * 6 + 1);
   if (!output)
@@ -204,6 +267,8 @@ char *basilisk_unicode_escape(const char *input) {
  * ============================================================ */
 
 char *basilisk_reverse(const char *input) {
+  if (!input)
+    return NULL;
   int len = strlen(input);
   char *output = (char *)malloc(len + 1);
   if (!output)

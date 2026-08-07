@@ -26,10 +26,12 @@ class TestProbeLoader(unittest.TestCase):
         assert len(probes) >= 200, f"Expected 200+ probes, got {len(probes)}"
 
     def test_all_probes_have_required_fields(self):
-        """Every probe must have id and payload."""
+        """Every probe must have an id and executable single- or multi-turn content."""
         for probe in load_probes(force_reload=True):
             assert probe.id, f"Probe missing id: {probe}"
-            assert probe.payload, f"Probe {probe.id} missing payload"
+            assert probe.payload or probe.turns or probe.messages, (
+                f"Probe {probe.id} missing payload, turns, and messages"
+            )
 
     def test_no_duplicate_ids(self):
         """Probe IDs should be unique across all files."""

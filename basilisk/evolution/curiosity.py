@@ -203,7 +203,11 @@ class BehavioralSpace:
             labels = kmeans.fit_predict(tfidf)
 
             return int(labels[-1])
+        except (ImportError, ValueError) as exc:
+            logger.debug("TF-IDF behavior binning unavailable: %s", exc)
+            return self._jaccard_bin(response)
         except Exception:
+            logger.exception("Unexpected TF-IDF behavior-binning failure")
             return self._jaccard_bin(response)
 
     def _semantic_novelty(self, response: str) -> float:
@@ -227,8 +231,10 @@ class BehavioralSpace:
                 matrix = vectorizer.fit_transform(corpus + [response])
                 similarity = cosine_similarity(matrix[-1], matrix[:-1]).max()
                 return max(0.0, min(1.0, 1.0 - float(similarity)))
+            except (ImportError, ValueError) as exc:
+                logger.debug("TF-IDF semantic novelty unavailable: %s", exc)
             except Exception:
-                pass
+                logger.exception("Unexpected TF-IDF novelty failure")
 
         response_words = set(response.lower().split())
         if not response_words:

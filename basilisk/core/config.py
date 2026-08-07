@@ -32,6 +32,32 @@ class ScanMode(str, Enum):
     CHAOS = "chaos"         # Everything parallel, max evolution
 
 
+@dataclass(frozen=True)
+class ScanModeProfile:
+    mode: ScanMode
+    max_requests: int
+    max_concurrency: int
+    minimum_delay_seconds: float
+    jitter_seconds: float
+    timeout_seconds: float
+    max_response_bytes: int
+    max_input_tokens: int
+    max_output_tokens: int
+    retry_attempts: int
+    run_recon: bool
+    run_evolution: bool
+    include_research: bool
+
+
+MODE_PROFILES: dict[ScanMode, ScanModeProfile] = {
+    ScanMode.QUICK: ScanModeProfile(ScanMode.QUICK, 60, 2, 0.0, 0.0, 20.0, 524_288, 150_000, 8_192, 0, False, False, False),
+    ScanMode.STANDARD: ScanModeProfile(ScanMode.STANDARD, 400, 4, 0.1, 0.0, 30.0, 1_048_576, 1_000_000, 16_384, 1, True, True, False),
+    ScanMode.DEEP: ScanModeProfile(ScanMode.DEEP, 1_600, 4, 0.1, 0.0, 45.0, 2_097_152, 4_000_000, 32_768, 1, True, True, False),
+    ScanMode.STEALTH: ScanModeProfile(ScanMode.STEALTH, 250, 1, 1.0, 2.0, 30.0, 1_048_576, 750_000, 16_384, 0, True, False, False),
+    ScanMode.CHAOS: ScanModeProfile(ScanMode.CHAOS, 5_000, 10, 0.0, 0.0, 60.0, 4_194_304, 10_000_000, 65_536, 0, True, True, True),
+}
+
+
 @dataclass
 class TargetConfig:
     """Configuration for a single scan target."""
@@ -48,38 +74,8 @@ class TargetConfig:
     def resolve_api_key(self) -> str:
         """Resolve API key from config, environment variables, or files."""
         key = self.api_key
-        
-        # 1. Handle @filename syntax
-        if key.startswith("@"):
-            raw_path = key[1:]
-            path = Path(raw_path).expanduser().resolve()
-            
-            
-            safe_roots = [
-                Path("~/.basilisk").expanduser().resolve(),
-                Path.cwd().resolve()
-            ]
-            
-            is_safe = any(path.is_relative_to(root) for root in safe_roots)
-            allow_unsafe = os.environ.get("BASILISK_ALLOW_UNSAFE_CONFIG_READ", "").lower() == "true"
-            
-            if not is_safe and not allow_unsafe:
-                logger.error(
-                    "SECURITY ALERT: @filename path '%s' is outside permitted directories. "
-                    "Only files in ~/.basilisk/ or CWD are allowed for enterprise security. "
-                    "Use BASILISK_ALLOW_UNSAFE_CONFIG_READ=true to override (NOT RECOMMENDED).",
-                    raw_path
-                )
-                return ""
-                
-            if path.exists():
-                return path.read_text("utf-8").strip()
-            # If specified as file but not found, return empty (validation will catch it)
-            return ""
-
-        # 2. Use explicit key if provided
         if key:
-            return key
+            return _resolve_secret_reference(key, purpose="API key")
 
         # 3. Fallback to environment variables
         env_mapping = {
@@ -89,9 +85,82 @@ class TargetConfig:
             "azure": "AZURE_API_KEY",
             "xai": "XAI_API_KEY",
             'groq': 'GROQ_API_KEY',
+            "nvidia": "NVIDIA_API_KEY",
         }
         env_var = env_mapping.get(self.provider, "BASILISK_API_KEY")
         return os.environ.get(env_var, "")
+
+    def resolve_auth_header(self) -> str:
+        """Resolve a custom Authorization header without requiring inline CLI input."""
+        if self.auth_header:
+            return _resolve_secret_reference(
+                self.auth_header,
+                purpose="authorization header",
+            )
+        return os.environ.get("BASILISK_AUTH_HEADER", "")
+
+    def resolve_custom_headers(self) -> dict[str, str]:
+        """Resolve sensitive header values only from environment/file references."""
+        resolved: dict[str, str] = {}
+        for key, value in self.custom_headers.items():
+            resolved[key] = (
+                _resolve_secret_reference(value, purpose=f"custom header {key}")
+                if _looks_sensitive_key(key)
+                else value
+            )
+        return resolved
+
+
+def _read_secret_reference(value: str, *, purpose: str) -> str:
+    raw_path = value[1:]
+    path = Path(raw_path).expanduser().resolve()
+    safe_roots = [
+        Path("~/.basilisk").expanduser().resolve(),
+        Path.cwd().resolve(),
+    ]
+    is_safe = any(path.is_relative_to(root) for root in safe_roots)
+    allow_unsafe = os.environ.get("BASILISK_ALLOW_UNSAFE_CONFIG_READ", "").lower() == "true"
+    if not is_safe and not allow_unsafe:
+        logger.error(
+            "Refusing %s file outside ~/.basilisk or the current workspace: %s",
+            purpose,
+            raw_path,
+        )
+        return ""
+    try:
+        return path.read_text("utf-8").strip() if path.is_file() else ""
+    except OSError as exc:
+        logger.error("Unable to read %s file %s: %s", purpose, raw_path, type(exc).__name__)
+        return ""
+
+
+def _resolve_secret_reference(value: str, *, purpose: str) -> str:
+    if value.startswith("@"):
+        return _read_secret_reference(value, purpose=purpose)
+    if value.startswith("${") and value.endswith("}"):
+        name = value[2:-1]
+    elif value.startswith("$"):
+        name = value[1:]
+    else:
+        logger.error("Refusing inline %s; use @file or $ENV_VAR", purpose)
+        return ""
+    if not name or not name[0].isalpha() or not name.replace("_", "").isalnum():
+        logger.error("Invalid environment-variable reference for %s", purpose)
+        return ""
+    return os.environ.get(name, "")
+
+
+def _is_secret_reference(value: str) -> bool:
+    if not value:
+        return True
+    if value.startswith("@"):
+        return len(value) > 1
+    if value.startswith("${") and value.endswith("}"):
+        value = f"${value[2:-1]}"
+    if not value.startswith("$"):
+        return False
+    name = value[1:]
+    return bool(name and name[0].isalpha() and name.replace("_", "").isalnum())
 
 
 @dataclass
@@ -120,6 +189,7 @@ class EvolutionConfig:
     operator_reward_decay: float = 0.92
     operator_exploration_bias: float = 0.08
     multi_objective_mode: str = "pareto"
+    random_seed: int = 0
 
 
 @dataclass
@@ -176,6 +246,7 @@ class BasiliskConfig:
     dashboard: DashboardConfig = field(default_factory=DashboardConfig)
     stealth: StealthConfig = field(default_factory=StealthConfig)
     modules: list[str] = field(default_factory=list)   # Empty = all attack modules
+    probe_ids: list[str] = field(default_factory=list)  # Empty = every probe in module manifests
     recon_modules: list[str] = field(default_factory=list) # Empty = all recon steps
     exclude_modules: list[str] = field(default_factory=list)
     max_findings: int = 0           # 0 = unlimited
@@ -188,6 +259,48 @@ class BasiliskConfig:
     persist_payloads: bool = False
     persist_responses: bool = False
     persist_conversations: bool = False
+
+    @property
+    def mode_profile(self) -> ScanModeProfile:
+        return MODE_PROFILES[self.mode]
+
+    @property
+    def research_modules_enabled(self) -> bool:
+        """Research modules require explicit opt-in except in isolated chaos mode."""
+        return self.include_research_modules or self.mode_profile.include_research
+
+    def request_policy(self):
+        """Build a request policy that can only tighten immutable mode ceilings."""
+        from basilisk.runtime.request_engine import RequestPolicy
+
+        profile = self.mode_profile
+        request_budget = self.policy.request_budget or profile.max_requests
+        return RequestPolicy(
+            max_requests=min(request_budget, profile.max_requests),
+            max_input_tokens=min(self.policy.max_input_tokens, profile.max_input_tokens),
+            max_output_tokens=min(self.policy.max_output_tokens, profile.max_output_tokens),
+            max_response_bytes=min(self.policy.max_response_bytes, profile.max_response_bytes),
+            timeout_seconds=min(self.policy.request_timeout, self.target.timeout, profile.timeout_seconds),
+            max_concurrency=min(self.policy.max_concurrency, profile.max_concurrency),
+            minimum_delay_seconds=max(self.policy.rate_limit_delay, profile.minimum_delay_seconds),
+            jitter_seconds=profile.jitter_seconds,
+            retry_attempts=min(self.policy.retry_attempts, profile.retry_attempts),
+        )
+
+    def cost_preview(
+        self,
+        *,
+        input_usd_per_million: float | None = None,
+        output_usd_per_million: float | None = None,
+    ):
+        """Build a no-network scan plan bounded by this mode's immutable ceilings."""
+        from basilisk.core.cost import build_scan_cost_preview
+
+        return build_scan_cost_preview(
+            self,
+            input_usd_per_million=input_usd_per_million,
+            output_usd_per_million=output_usd_per_million,
+        )
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> BasiliskConfig:
@@ -265,6 +378,8 @@ class BasiliskConfig:
             config.output.output_dir = kwargs["output_dir"]
         if kwargs.get("module"):
             config.modules = list(kwargs["module"])
+        if kwargs.get("probe_id"):
+            config.probe_ids = list(dict.fromkeys(str(item) for item in kwargs["probe_id"]))
         if kwargs.get("verbose"):
             config.verbose = kwargs["verbose"]
         if kwargs.get("debug"):
@@ -273,6 +388,8 @@ class BasiliskConfig:
             config.dashboard.enabled = False
         if kwargs.get("fail_on"):
             config.fail_on = kwargs["fail_on"]
+        if kwargs.get("max_findings") is not None:
+            config.max_findings = int(kwargs["max_findings"])
         if kwargs.get("skip_recon"):
             config.skip_recon = True
         if kwargs.get("recon_module"):
@@ -304,9 +421,39 @@ class BasiliskConfig:
     def validate(self) -> list[str]:
         """Validate the configuration and return list of errors."""
         errors: list[str] = []
+        secret_fields = {
+            "target.api_key": self.target.api_key,
+            "target.auth_header": self.target.auth_header,
+            "evolution.attacker_api_key": self.evolution.attacker_api_key,
+            "output.jira_token": self.output.jira_token,
+            "output.defectdojo_token": self.output.defectdojo_token,
+        }
+        for field_name, value in secret_fields.items():
+            if value and not _is_secret_reference(value):
+                errors.append(
+                    f"{field_name} must use @file or $ENV_VAR; inline secrets are rejected"
+                )
+        for header, value in self.target.custom_headers.items():
+            if _looks_sensitive_key(header) and value and not _is_secret_reference(value):
+                errors.append(
+                    f"target.custom_headers.{header} must use @file or $ENV_VAR"
+                )
+        if self.probe_ids:
+            from basilisk.payloads.loader import load_probes
+
+            known_probe_ids = {probe.id for probe in load_probes()}
+            unknown = sorted(set(self.probe_ids) - known_probe_ids)
+            if unknown:
+                errors.append(f"Unknown canonical probe IDs: {', '.join(unknown)}")
         if not self.target.url:
             errors.append("Target URL is required")
-        if not self.target.resolve_api_key() and self.target.provider != "custom":
+        keyless_providers = {"custom", "websocket"}
+        is_websocket_target = self.target.url.startswith(("ws://", "wss://"))
+        if (
+            not self.target.resolve_api_key()
+            and self.target.provider not in keyless_providers
+            and not is_websocket_target
+        ):
             errors.append(f"API key not found for provider '{self.target.provider}'")
         if self.evolution.population_size < 10:
             errors.append("Evolution population size must be >= 10")
@@ -317,6 +464,8 @@ class BasiliskConfig:
             errors.append("Campaign operator is required for exploit_chain or research mode")
         if self.policy.approval_required and not self.campaign.authorization.approved:
             errors.append("Campaign approval is required by policy but not confirmed")
+        if self.mode == ScanMode.CHAOS and not self.policy.isolated_environment:
+            errors.append("Chaos mode requires policy.isolated_environment=true")
         return errors
 
     def to_dict(self) -> dict[str, Any]:

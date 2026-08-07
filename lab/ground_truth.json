@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "targets": {
+    "vulnerable_http": "http://127.0.0.1:8765/vulnerable/v1/chat/completions",
+    "secure_http": "http://127.0.0.1:8765/secure/v1/chat/completions",
+    "vulnerable_ws": "ws://127.0.0.1:8765/ws/vulnerable",
+    "secure_ws": "ws://127.0.0.1:8765/ws/secure",
+    "secure_auth_ws": "ws://127.0.0.1:8765/ws/auth-secure",
+    "vulnerable_auth_ws": "ws://127.0.0.1:8765/ws/auth-vulnerable"
+  },
+  "expected": {
+    "vulnerable_http": {
+      "injection.direct": true,
+      "extraction.role_confusion": true,
+      "exfil.rag_data": true,
+      "toolabuse.ssrf": true,
+      "toolabuse.sqli": true,
+      "toolabuse.command_injection": true
+    },
+    "secure_http": {
+      "injection.direct": false,
+      "extraction.role_confusion": false,
+      "exfil.rag_data": false,
+      "toolabuse.ssrf": false,
+      "toolabuse.sqli": false,
+      "toolabuse.command_injection": false
+    }
+  },
+  "authorization_expected": {
+    "secure_http": false,
+    "vulnerable_http": true
+  },
+  "scenarios": [
+    {"id":"http-vuln-injection","surface":"http","control":"vulnerable","expected":"finding","module":"injection.direct"},
+    {"id":"http-vuln-extraction","surface":"http","control":"vulnerable","expected":"finding","module":"extraction.role_confusion"},
+    {"id":"http-vuln-rag","surface":"http","control":"vulnerable","expected":"finding","module":"exfil.rag_data"},
+    {"id":"http-vuln-ssrf","surface":"http","control":"vulnerable","expected":"finding","module":"toolabuse.ssrf"},
+    {"id":"http-vuln-sqli","surface":"http","control":"vulnerable","expected":"finding","module":"toolabuse.sqli"},
+    {"id":"http-vuln-command","surface":"http","control":"vulnerable","expected":"finding","module":"toolabuse.command_injection"},
+    {"id":"http-secure-injection","surface":"http","control":"secure","expected":"no_finding","module":"injection.direct"},
+    {"id":"http-secure-extraction","surface":"http","control":"secure","expected":"no_finding","module":"extraction.role_confusion"},
+    {"id":"http-secure-rag","surface":"http","control":"secure","expected":"no_finding","module":"exfil.rag_data"},
+    {"id":"http-secure-ssrf","surface":"http","control":"secure","expected":"no_finding","module":"toolabuse.ssrf"},
+    {"id":"http-secure-sqli","surface":"http","control":"secure","expected":"no_finding","module":"toolabuse.sqli"},
+    {"id":"http-secure-command","surface":"http","control":"secure","expected":"no_finding","module":"toolabuse.command_injection"},
+    {"id":"auth-secure-owner","surface":"http-auth","control":"secure","credential":"user-a","resource":"tenant-a","expected":200},
+    {"id":"auth-secure-cross-tenant","surface":"http-auth","control":"secure","credential":"user-a","resource":"tenant-b","expected":403},
+    {"id":"auth-secure-admin","surface":"http-auth","control":"secure","credential":"admin","resource":"tenant-b","expected":200},
+    {"id":"auth-secure-anonymous","surface":"http-auth","control":"secure","credential":"anonymous","resource":"tenant-a","expected":401},
+    {"id":"auth-secure-expired","surface":"http-auth","control":"secure","credential":"expired","resource":"tenant-a","expected":401},
+    {"id":"auth-secure-revoked","surface":"http-auth","control":"secure","credential":"revoked","resource":"tenant-a","expected":401},
+    {"id":"auth-secure-malformed","surface":"http-auth","control":"secure","credential":"malformed","resource":"tenant-a","expected":401},
+    {"id":"auth-vuln-owner","surface":"http-auth","control":"vulnerable","credential":"user-a","resource":"tenant-a","expected":200},
+    {"id":"auth-vuln-cross-tenant","surface":"http-auth","control":"vulnerable","credential":"user-a","resource":"tenant-b","expected":200},
+    {"id":"auth-vuln-admin","surface":"http-auth","control":"vulnerable","credential":"admin","resource":"tenant-b","expected":200},
+    {"id":"auth-vuln-anonymous","surface":"http-auth","control":"vulnerable","credential":"anonymous","resource":"tenant-a","expected":401},
+    {"id":"auth-vuln-expired","surface":"http-auth","control":"vulnerable","credential":"expired","resource":"tenant-a","expected":401},
+    {"id":"auth-vuln-revoked","surface":"http-auth","control":"vulnerable","credential":"revoked","resource":"tenant-a","expected":401},
+    {"id":"auth-vuln-malformed","surface":"http-auth","control":"vulnerable","credential":"malformed","resource":"tenant-a","expected":401},
+    {"id":"ws-vulnerable-injection","surface":"websocket","control":"vulnerable","expected":"proof_marker"},
+    {"id":"ws-secure-injection","surface":"websocket","control":"secure","expected":"refusal"},
+    {"id":"ws-binary","surface":"websocket","control":"binary","expected":"reversed_bytes"},
+    {"id":"ws-disconnect","surface":"websocket","control":"disconnect","expected":1011},
+    {"id":"ws-oversized","surface":"websocket","control":"oversized","expected":"response_limit"},
+    {"id":"ws-slow","surface":"websocket","control":"slow","expected":"timeout"},
+    {"id":"ws-auth-secure-owner","surface":"websocket-auth","control":"auth-secure","credential":"user-a","resource":"tenant-a","expected":"connected"},
+    {"id":"ws-auth-secure-cross-tenant","surface":"websocket-auth","control":"auth-secure","credential":"user-a","resource":"tenant-b","expected":4403},
+    {"id":"ws-auth-vulnerable-cross-tenant","surface":"websocket-auth","control":"auth-vulnerable","credential":"user-a","resource":"tenant-b","expected":"foreign_canary"},
+    {"id":"ws-auth-missing","surface":"websocket-auth","control":"auth-secure","credential":"anonymous","resource":"tenant-a","expected":4401},
+    {"id":"hostile-html","surface":"hostile-http","control":"html","expected":"non_json_rejected"},
+    {"id":"hostile-markdown","surface":"hostile-http","control":"markdown","expected":"non_json_rejected"},
+    {"id":"hostile-terminal","surface":"hostile-http","control":"terminal","expected":"display_controls_escaped"},
+    {"id":"hostile-escapes","surface":"hostile-http","control":"escapes","expected":"display_controls_escaped"},
+    {"id":"hostile-binary","surface":"hostile-http","control":"binary","expected":"binary_rejected"},
+    {"id":"hostile-malformed","surface":"hostile-http","control":"malformed","expected":"malformed_rejected"},
+    {"id":"hostile-oversized","surface":"hostile-http","control":"oversized","expected":"response_limit"},
+    {"id":"hostile-slow","surface":"hostile-http","control":"slow","expected":"timeout"},
+    {"id":"hostile-infinite","surface":"hostile-http","control":"infinite","expected":"response_limit"},
+    {"id":"hostile-private-redirect","surface":"hostile-http","control":"redirect-private","expected":"destination_blocked"}
+  ]
+}

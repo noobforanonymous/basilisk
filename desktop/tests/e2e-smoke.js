@@ -3,7 +3,23 @@ const assert = require('node:assert/strict');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
+
+function terminateProcessTree(child) {
+    if (!child || !child.pid) return;
+    if (process.platform === 'win32') {
+        spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], {
+            stdio: 'ignore',
+            windowsHide: true,
+        });
+        return;
+    }
+    try {
+        process.kill(-child.pid, 'SIGTERM');
+    } catch {
+        try { child.kill('SIGTERM'); } catch { /* process already exited */ }
+    }
+}
 
 function waitForFile(filePath, timeoutMs = 30000) {
     const started = Date.now();
@@ -37,7 +53,11 @@ function waitForSnapshot(child, filePath, timeoutMs = 30000) {
                 const isTerminal = lastSnapshot.uiReady || ['backend_timeout', 'ui_error', 'backend_error', 'startup_error'].includes(lastSnapshot.stage);
                 if (isTerminal) {
                     clearInterval(timer);
-                    resolve(lastSnapshot);
+                    if (lastSnapshot.uiReady) {
+                        resolve(lastSnapshot);
+                    } else {
+                        reject(new Error(`Electron reached terminal failure state\nlast snapshot:\n${JSON.stringify(lastSnapshot, null, 2)}\nstdout:\n${stdout}\nstderr:\n${stderr}`));
+                    }
                     return;
                 }
             }
@@ -57,8 +77,10 @@ function waitForSnapshot(child, filePath, timeoutMs = 30000) {
 }
 
 test('electron desktop boots backend and reaches renderer-ready state', async () => {
-    const electronBinary = path.join(__dirname, '..', 'node_modules', '.bin', process.platform === 'win32' ? 'electron.cmd' : 'electron');
-    if (!fs.existsSync(electronBinary)) {
+    let electronBinary;
+    try {
+        electronBinary = require('electron');
+    } catch {
         test.skip('Electron binary not installed in desktop/node_modules');
         return;
     }
@@ -69,18 +91,19 @@ test('electron desktop boots backend and reaches renderer-ready state', async ()
     const child = spawn(electronBinary, ['--no-sandbox', '--disable-setuid-sandbox', '.'], {
         cwd: path.join(__dirname, '..'),
         stdio: ['ignore', 'pipe', 'pipe'],
+        detached: process.platform !== 'win32',
         env: {
             ...childEnv,
             BASILISK_E2E: '1',
-            BASILISK_E2E_AUTOEXIT: '1',
+            BASILISK_E2E_AUTOEXIT: '0',
             BASILISK_E2E_OUT: outFile,
         },
     });
 
     try {
         const data = await waitForSnapshot(child, outFile, 45000);
-        assert.equal(data.backendReady, true);
-        assert.equal(data.uiReady, true);
+        assert.equal(data.backendReady, true, JSON.stringify(data, null, 2));
+        assert.equal(data.uiReady, true, JSON.stringify(data, null, 2));
         assert.equal(data.stage, 'ui_ready');
         assert.ok(data.backendPort);
         assert.ok(data.tabCount >= 10);
@@ -96,8 +119,11 @@ test('electron desktop boots backend and reaches renderer-ready state', async ()
         assert.ok(data.reportOptions >= 2);
         assert.equal(data.stopWorked, true);
         assert.equal(data.logCapturedCompletion, true);
+        assert.equal(data.costPreviewVisible, true);
     } finally {
-        child.kill('SIGTERM');
+        terminateProcessTree(child);
+        child.stdout?.destroy();
+        child.stderr?.destroy();
         fs.rmSync(outFile, { force: true });
     }
 });

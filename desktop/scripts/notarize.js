@@ -5,11 +5,18 @@ exports.default = async function notarizeApp(context) {
     if (context.electronPlatformName !== 'darwin') {
         return;
     }
+    if (process.env.BASILISK_SKIP_NOTARIZE === '1') {
+        console.log('[notarize] Skipping notarization for the non-release upgrade fixture.');
+        return;
+    }
 
     const appPath = path.join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`);
     const teamId = process.env.APPLE_TEAM_ID;
     if (!teamId) {
-        console.log('[notarize] APPLE_TEAM_ID not configured, skipping notarization.');
+        if (process.env.BASILISK_REQUIRE_VENDOR_TRUST === 'true') {
+            throw new Error('Tagged release requires APPLE_TEAM_ID and notarization credentials.');
+        }
+        console.log('[notarize] APPLE_TEAM_ID not configured, skipping notarization for preview build.');
         return;
     }
 
@@ -41,5 +48,8 @@ exports.default = async function notarizeApp(context) {
         return;
     }
 
-    console.log('[notarize] Apple notarization credentials not configured, skipping notarization.');
+    if (process.env.BASILISK_REQUIRE_VENDOR_TRUST === 'true') {
+        throw new Error('Tagged release requires Apple notarization credentials.');
+    }
+    console.log('[notarize] Apple notarization credentials not configured, skipping preview notarization.');
 };

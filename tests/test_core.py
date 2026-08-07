@@ -8,7 +8,13 @@ import json
 import pytest
 from datetime import datetime, timezone
 
-from basilisk.core.finding import Finding, Severity, AttackCategory, Message
+from basilisk.core.finding import (
+    AttackCategory,
+    Finding,
+    FindingValidationLevel,
+    Message,
+    Severity,
+)
 from basilisk.core.evidence import (
     EvidenceBundle,
     EvidenceSignal,
@@ -94,8 +100,9 @@ class TestMessage:
     def test_message_sanitized_dict(self):
         msg = Message(role="assistant", content="A" * 400)
         d = msg.sanitized_dict(max_chars=20)
-        assert d["content"].startswith("A" * 20)
-        assert d["content"].endswith("...")
+        assert d["content"].startswith("[redacted] sha256=")
+        assert d["content"].endswith("bytes=400")
+        assert "A" * 20 not in d["content"]
 
 
 # ── Finding ──
@@ -418,6 +425,40 @@ class TestBasiliskConfig:
         t = TargetConfig(url="https://api.openai.com", provider="openai")
         assert t.resolve_api_key() == "sk-test-123"
 
+    def test_auth_header_resolves_from_environment(self, monkeypatch):
+        monkeypatch.setenv("BASILISK_AUTH_HEADER", "Bearer environment-token")
+        assert TargetConfig().resolve_auth_header() == "Bearer environment-token"
+
+    def test_yaml_style_inline_secrets_are_rejected(self):
+        cfg = BasiliskConfig.from_dict({
+            "target": {
+                "url": "https://example.test",
+                "provider": "custom",
+                "api_key": "inline-private",
+                "auth_header": "Bearer inline-private",
+                "custom_headers": {"Cookie": "session=inline-private"},
+            },
+            "evolution": {"attacker_api_key": "inline-attacker"},
+        })
+        errors = cfg.validate()
+        assert any("target.api_key" in error for error in errors)
+        assert any("target.auth_header" in error for error in errors)
+        assert any("target.custom_headers.Cookie" in error for error in errors)
+        assert any("evolution.attacker_api_key" in error for error in errors)
+
+    def test_secret_environment_references_resolve_centrally(self, monkeypatch):
+        monkeypatch.setenv("BASILISK_TEST_PROVIDER_KEY", "provider-private")
+        monkeypatch.setenv("BASILISK_TEST_COOKIE", "session=private")
+        target = TargetConfig(
+            api_key="$BASILISK_TEST_PROVIDER_KEY",
+            custom_headers={"Cookie": "${BASILISK_TEST_COOKIE}", "X-Trace": "public"},
+        )
+        assert target.resolve_api_key() == "provider-private"
+        assert target.resolve_custom_headers() == {
+            "Cookie": "session=private",
+            "X-Trace": "public",
+        }
+
     def test_scan_modes(self):
         for mode in ["quick", "standard", "deep", "stealth", "chaos"]:
             assert ScanMode(mode).value == mode
@@ -478,6 +519,9 @@ class TestIntegration:
                 attack_module="basilisk.attacks.injection.direct",
             )
             await session.add_finding(finding)
+            assert session.findings[0].validation_level == FindingValidationLevel.OBSERVATION
+            assert session.findings[0].severity == Severity.HIGH
+            await session.reassess_finding(finding, final=True)
             assert session.findings[0].severity == Severity.MEDIUM
             assert session.findings[0].metadata["policy_downgraded"] is True
             assert session.summary["schema_version"] == "2.0"
@@ -512,8 +556,10 @@ class TestIntegration:
                     ],
                     replay_steps=["Replay the exact payload against the same target configuration."],
                 ),
+                validation_level=FindingValidationLevel.VERIFIED,
             )
             await session.add_finding(finding)
+            await session.reassess_finding(finding, final=True)
             assert session.findings[0].severity == Severity.HIGH
             assert session.findings[0].metadata.get("policy_downgraded") is not True
         finally:

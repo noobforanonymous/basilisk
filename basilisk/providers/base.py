@@ -11,6 +11,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator
 
+from basilisk.core.redaction import sanitize_error_text
+
 
 @dataclass
 class ProviderResponse:
@@ -213,7 +215,7 @@ class ProviderAdapter(ABC):
                 return False, resp.error
             return True, None
         except Exception as e:
-            return False, str(e)
+            return False, sanitize_error_text(e)
 
     def is_refusal(self, response: ProviderResponse) -> bool:
         """

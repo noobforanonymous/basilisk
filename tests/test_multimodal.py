@@ -286,8 +286,8 @@ class TestMultimodalInjection:
         assert all("Multimodal Bypass" in f.title for f in findings)
         assert mock_session.add_finding.await_count == len(findings)
 
-        # Provider should have been called 5 times (one per technique)
-        assert mock_provider.send.call_count == 5
+        # Every canonical multimodal probe is exercised exactly once.
+        assert mock_provider.send.call_count == len(mod.canonical_probes())
 
     @pytest.mark.asyncio
     async def test_execute_handles_refusals(self):

@@ -8,10 +8,13 @@ inconsistencies, citation patterns, and retrieval artifacts.
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 
 from basilisk.core.profile import BasiliskProfile
 from basilisk.providers.base import ProviderAdapter, ProviderMessage
+
+logger = logging.getLogger("basilisk.recon.rag")
 
 RAG_PROBES = [
     {
@@ -102,8 +105,10 @@ async def detect_rag(
                     rag_signals += local_signals
                     indicators_found.extend(local_indicators)
 
+        except asyncio.CancelledError:
+            raise
         except Exception:
-            pass
+            logger.exception("Unexpected failure during RAG-detection probe")
 
     await asyncio.gather(*(run_probe(p) for p in RAG_PROBES))
 

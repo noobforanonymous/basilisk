@@ -16,6 +16,7 @@ import {
 import { apiFetch, log, toast } from './core.js';
 
 const timerEl = document.getElementById('scan-timer');
+const btnPreview = document.getElementById('btn-scan-preview');
 const btnStart = document.getElementById('btn-scan-start');
 const btnStop = document.getElementById('btn-scan-stop');
 const progressPane = document.getElementById('scan-progress-pane');
@@ -25,6 +26,79 @@ const scanPill = document.getElementById('scan-mode-pill');
 const liveFindings = document.getElementById('live-findings');
 const liveCount = document.getElementById('live-count');
 const scanDot = document.getElementById('scan-dot');
+const previewSummary = document.getElementById('scan-preview-summary');
+const previewCost = document.getElementById('scan-preview-cost');
+
+function collectScanConfig() {
+    return {
+        target: document.getElementById('s-target').value.trim(),
+        provider: document.getElementById('s-provider').value,
+        model: document.getElementById('s-model').value,
+        mode: document.getElementById('s-mode').value,
+        evolve: true,
+        generations: parseInt(document.getElementById('s-gens').value, 10) || 5,
+        output_format: document.getElementById('s-format').value,
+        include_research_modules: document.getElementById('s-include-research').checked,
+        skip_recon: document.getElementById('s-skip-recon').checked,
+        recon_modules: Array.from(document.querySelectorAll('.recon-mod:checked')).map((el) => el.value),
+        modules: [],
+        probe_ids: [],
+        attacker_provider: document.getElementById('s-attacker-provider').value,
+        attacker_model: document.getElementById('s-attacker-model').value,
+        population_size: parseInt(document.getElementById('s-pop-size').value, 10) || 10,
+        fitness_threshold: parseFloat(document.getElementById('s-fitness-threshold').value) || 0.9,
+        stagnation_limit: parseInt(document.getElementById('s-stagnation').value, 10) || 3,
+        exit_on_first: document.getElementById('s-exit-on-first').checked,
+        enable_cache: document.getElementById('s-cache').checked,
+        diversity_mode: document.getElementById('s-diversity-mode').value,
+        intent_weight: parseFloat(document.getElementById('s-intent-weight').value) || 0.15,
+        campaign: {
+            name: document.getElementById('s-campaign-name').value.trim(),
+            objective: {
+                name: document.getElementById('s-objective').value.trim(),
+                hypothesis: document.getElementById('s-hypothesis').value.trim(),
+            },
+            authorization: {
+                operator: document.getElementById('s-operator').value.trim(),
+                ticket_id: document.getElementById('s-ticket').value.trim(),
+                target_owner: document.getElementById('s-target-owner').value.trim(),
+                scope_targets: csvList(document.getElementById('s-scope-targets').value),
+                approved: document.getElementById('s-approval-confirmed').checked,
+            },
+        },
+        policy: {
+            execution_mode: document.getElementById('s-execution-mode').value,
+            evidence_threshold: document.getElementById('s-evidence-threshold').value,
+            aggression: parseInt(document.getElementById('s-aggression').value, 10) || 3,
+            max_concurrency: parseInt(document.getElementById('s-max-concurrency').value, 10) || 5,
+            request_budget: parseInt(document.getElementById('s-request-budget').value, 10) || 0,
+            rate_limit_delay: parseFloat(document.getElementById('s-rate-limit-delay').value) || 0,
+            raw_evidence_mode: document.getElementById('s-raw-evidence-mode').value,
+            retain_days: parseInt(document.getElementById('s-retain-days').value, 10) || 30,
+            allow_modules: csvList(document.getElementById('s-allow-modules').value),
+            deny_modules: csvList(document.getElementById('s-deny-modules').value),
+            dry_run: document.getElementById('s-dry-run').checked,
+            approval_required: document.getElementById('s-approval-required').checked,
+            approval_confirmed: document.getElementById('s-approval-confirmed').checked,
+            retain_raw_findings: document.getElementById('s-retain-raw').checked,
+            retain_conversations: document.getElementById('s-retain-conversations').checked,
+            stop_on_severity: document.getElementById('s-stop-on-severity').value,
+            isolated_environment: document.getElementById('s-isolated-environment').checked,
+            allow_private_targets: document.getElementById('s-isolated-environment').checked,
+            allow_insecure_http: document.getElementById('s-isolated-environment').checked,
+        },
+        max_findings: parseInt(document.getElementById('s-max-findings').value, 10) || 0,
+    };
+}
+
+function renderCostPreview(preview) {
+    const bounded = preview.bounded_by_mode_ceiling ? ' (capped by mode)' : '';
+    previewSummary.innerText = `${preview.mode.toUpperCase()} â€” ${preview.module_count} modules, ${preview.probe_executions} probe executions, ${preview.estimated_requests}/${preview.request_maximum} planned requests${bounded}.`;
+    const cost = preview.estimated_cost_usd === null
+        ? 'USD unavailable until provider/model rates are supplied'
+        : `$${Number(preview.estimated_cost_usd).toFixed(6)} USD`;
+    previewCost.innerText = `${preview.estimated_input_tokens.toLocaleString()} input + ${preview.estimated_output_tokens.toLocaleString()} output tokens; ${cost}.`;
+}
 
 function updateRecon(profile) {
     const safe = (id, value) => {
@@ -268,68 +342,78 @@ export function handleScanEvent(event, data) {
 }
 
 export function initScan() {
+    let previewFingerprint = '';
+    const invalidatePreview = () => {
+        previewFingerprint = '';
+        btnStart.disabled = true;
+        previewSummary.innerText = 'Configuration changed. Calculate the plan again before starting.';
+        previewCost.innerText = 'No target request will be sent by preview.';
+    };
+    document.querySelector('#v-scan .cfg-grid')?.addEventListener('input', invalidatePreview);
+    document.querySelector('#v-scan .cfg-grid')?.addEventListener('change', invalidatePreview);
+
+    btnPreview?.addEventListener('click', async () => {
+        const cfg = collectScanConfig();
+        if (!cfg.target) {
+            log('err', 'Target URL required before calculating the plan.');
+            return;
+        }
+        previewFingerprint = '';
+        btnStart.disabled = true;
+        btnPreview.disabled = true;
+        try {
+            const result = await apiFetch('/api/scan/preview', { method: 'POST', body: cfg });
+            if (!result.preview) {
+                throw new Error(result.error || result.detail?.error || 'Unable to calculate scan plan');
+            }
+            renderCostPreview(result.preview);
+            previewFingerprint = JSON.stringify(cfg);
+            btnStart.disabled = false;
+            log('ok', `Preflight ready: ${result.preview.estimated_requests}/${result.preview.request_maximum} planned requests.`);
+        } catch (error) {
+            previewFingerprint = '';
+            btnStart.disabled = true;
+            log('err', `Cost preview failed: ${error.message || 'Unknown error'}`);
+        } finally {
+            btnPreview.disabled = false;
+        }
+    });
+
     btnStart?.addEventListener('click', async () => {
-        const target = document.getElementById('s-target').value.trim();
+        const cfg = collectScanConfig();
+        const target = cfg.target;
         if (!target) {
             log('err', 'Target URL required.');
             return;
         }
+        if (!previewFingerprint || previewFingerprint !== JSON.stringify(cfg)) {
+            invalidatePreview();
+            log('err', 'Calculate the current scan plan before starting.');
+            return;
+        }
+        previewFingerprint = '';
+        btnStart.disabled = true;
 
-        const cfg = {
-            target,
-            provider: document.getElementById('s-provider').value,
-            model: document.getElementById('s-model').value,
-            api_key: document.getElementById('s-apikey').value,
-            mode: document.getElementById('s-mode').value,
-            evolve: true,
-            generations: parseInt(document.getElementById('s-gens').value, 10) || 5,
-            output_format: document.getElementById('s-format').value,
-            include_research_modules: document.getElementById('s-include-research').checked,
-            skip_recon: document.getElementById('s-skip-recon').checked,
-            recon_modules: Array.from(document.querySelectorAll('.recon-mod:checked')).map((el) => el.value),
-            modules: [],
-            attacker_provider: document.getElementById('s-attacker-provider').value,
-            attacker_model: document.getElementById('s-attacker-model').value,
-            attacker_api_key: document.getElementById('s-attacker-key').value,
-            population_size: parseInt(document.getElementById('s-pop-size').value, 10) || 10,
-            fitness_threshold: parseFloat(document.getElementById('s-fitness-threshold').value) || 0.9,
-            stagnation_limit: parseInt(document.getElementById('s-stagnation').value, 10) || 3,
-            exit_on_first: document.getElementById('s-exit-on-first').checked,
-            enable_cache: document.getElementById('s-cache').checked,
-            diversity_mode: document.getElementById('s-diversity-mode').value,
-            intent_weight: parseFloat(document.getElementById('s-intent-weight').value) || 0.15,
-            campaign: {
-                name: document.getElementById('s-campaign-name').value.trim(),
-                objective: {
-                    name: document.getElementById('s-objective').value.trim(),
-                    hypothesis: document.getElementById('s-hypothesis').value.trim(),
-                },
-                authorization: {
-                    operator: document.getElementById('s-operator').value.trim(),
-                    ticket_id: document.getElementById('s-ticket').value.trim(),
-                    target_owner: document.getElementById('s-target-owner').value.trim(),
-                    scope_targets: csvList(document.getElementById('s-scope-targets').value),
-                    approved: document.getElementById('s-approval-confirmed').checked,
-                },
-            },
-            policy: {
-                execution_mode: document.getElementById('s-execution-mode').value,
-                evidence_threshold: document.getElementById('s-evidence-threshold').value,
-                aggression: parseInt(document.getElementById('s-aggression').value, 10) || 3,
-                max_concurrency: parseInt(document.getElementById('s-max-concurrency').value, 10) || 5,
-                request_budget: parseInt(document.getElementById('s-request-budget').value, 10) || 0,
-                rate_limit_delay: parseFloat(document.getElementById('s-rate-limit-delay').value) || 0,
-                raw_evidence_mode: document.getElementById('s-raw-evidence-mode').value,
-                retain_days: parseInt(document.getElementById('s-retain-days').value, 10) || 30,
-                allow_modules: csvList(document.getElementById('s-allow-modules').value),
-                deny_modules: csvList(document.getElementById('s-deny-modules').value),
-                dry_run: document.getElementById('s-dry-run').checked,
-                approval_required: document.getElementById('s-approval-required').checked,
-                approval_confirmed: document.getElementById('s-approval-confirmed').checked,
-                retain_raw_findings: document.getElementById('s-retain-raw').checked,
-                retain_conversations: document.getElementById('s-retain-conversations').checked,
-            },
-        };
+        const provider = cfg.provider;
+        const inlineKey = document.getElementById('s-apikey').value;
+        if (inlineKey) {
+            const saved = await apiFetch('/api/settings/apikey', { method: 'POST', body: { provider, key: inlineKey } });
+            if (saved.error) {
+                log('err', `Unable to store API key securely: ${saved.error}`);
+                return;
+            }
+            document.getElementById('s-apikey').value = '';
+        }
+        const attackerProvider = cfg.attacker_provider;
+        const attackerKey = document.getElementById('s-attacker-key').value;
+        if (attackerKey && attackerProvider) {
+            const saved = await apiFetch('/api/settings/apikey', { method: 'POST', body: { provider: attackerProvider, key: attackerKey } });
+            if (saved.error) {
+                log('err', `Unable to store attacker API key securely: ${saved.error}`);
+                return;
+            }
+            document.getElementById('s-attacker-key').value = '';
+        }
 
         setHidden(btnStart, true);
         setHidden(btnStop, false);

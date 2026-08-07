@@ -33,6 +33,7 @@ from basilisk.core.database import BasiliskDatabase
 from basilisk.core.evidence import EvidenceSignal, EvidenceSignalKind, build_evidence_bundle
 from basilisk.core.finding import AttackCategory, Finding, Severity
 from basilisk.core.profile import DetectedTool, GuardrailLevel, ModelProvider
+from basilisk.core.redaction import sanitize_error_text
 from basilisk.core.session import ScanSession
 
 router = APIRouter()
@@ -62,10 +63,44 @@ def _scan_config_summary(cfg: BasiliskConfig) -> dict[str, Any]:
         "model": cfg.target.model,
         "mode": cfg.mode.value,
         "modules": list(cfg.modules),
+        "probe_ids": list(cfg.probe_ids),
         "skip_recon": cfg.skip_recon,
         "recon_modules": list(cfg.recon_modules),
-        "include_research_modules": cfg.include_research_modules,
+        "include_research_modules": cfg.research_modules_enabled,
     }
+
+
+def _config_from_request(config: ScanConfig) -> BasiliskConfig:
+    """Map the strict API model to runtime config without resolving credentials."""
+    return BasiliskConfig.from_cli_args(
+        target=config.target,
+        provider=config.provider,
+        model=config.model,
+        api_key="",
+        auth="",
+        mode=config.mode,
+        evolve=config.evolve,
+        generations=config.generations,
+        module=config.modules,
+        probe_id=config.probe_ids,
+        output=config.output_format,
+        skip_recon=config.skip_recon,
+        recon_module=config.recon_modules,
+        attacker_provider=config.attacker_provider,
+        attacker_model=config.attacker_model,
+        attacker_api_key="",
+        campaign=config.campaign,
+        policy=config.policy,
+        population_size=config.population_size,
+        fitness_threshold=config.fitness_threshold,
+        stagnation_limit=config.stagnation_limit,
+        exit_on_first=config.exit_on_first,
+        enable_cache=config.enable_cache,
+        diversity_mode=config.diversity_mode,
+        intent_weight=config.intent_weight,
+        include_research_modules=config.include_research_modules,
+        max_findings=config.max_findings,
+    )
 
 
 async def _load_runtime_state(session_id: str, db_path: str = "./basilisk-sessions.db") -> dict[str, Any] | None:
@@ -92,36 +127,31 @@ async def native_status():
         return {"tokens_c": False, "encoder_c": False, "fuzzer_go": False, "matcher_go": False}
 
 
+@router.post("/api/scan/preview", dependencies=[Depends(verify_token)])
+async def preview_scan(config: ScanConfig):
+    """Return the bounded no-network execution plan used by CLI and desktop."""
+    try:
+        cfg = _config_from_request(config)
+        return {
+            "preview": cfg.cost_preview(
+                input_usd_per_million=config.input_price_per_million,
+                output_usd_per_million=config.output_price_per_million,
+            ).to_dict()
+        }
+    except Exception as exc:
+        raise HTTPException(400, {"error": sanitize_error_text(exc)}) from exc
+
+
 @router.post("/api/scan", response_model=ScanStartResponse, dependencies=[Depends(verify_token)])
 async def start_scan(config: ScanConfig):
     try:
-        cfg = BasiliskConfig.from_cli_args(
-            target=config.target,
-            provider=config.provider,
-            model=config.model,
-            api_key=config.api_key or get_api_key(config.provider),
-            auth=config.auth,
-            mode=config.mode,
-            evolve=config.evolve,
-            generations=config.generations,
-            module=config.modules,
-            output=config.output_format,
-            skip_recon=config.skip_recon,
-            recon_module=config.recon_modules,
-            attacker_provider=config.attacker_provider,
-            attacker_model=config.attacker_model,
-            attacker_api_key=config.attacker_api_key or get_api_key(config.attacker_provider),
-            campaign=config.campaign,
-            policy=config.policy,
-            population_size=config.population_size,
-            fitness_threshold=config.fitness_threshold,
-            stagnation_limit=config.stagnation_limit,
-            exit_on_first=config.exit_on_first,
-            enable_cache=config.enable_cache,
-            diversity_mode=config.diversity_mode,
-            intent_weight=config.intent_weight,
-            include_research_modules=config.include_research_modules,
+        target_credential = get_api_key(config.provider)
+        attacker_credential = (
+            get_api_key(config.attacker_provider)
+            if config.attacker_provider
+            else None
         )
+        cfg = _config_from_request(config)
         if E2E_MODE and config.target.startswith("e2e://"):
             cfg.session_db = _e2e_session_db_path()
         errors = cfg.validate()
@@ -147,14 +177,23 @@ async def start_scan(config: ScanConfig):
             stop_requested=False,
             resumable=True,
         )
-        task_target = _run_e2e_scan_background(session, cfg) if E2E_MODE and cfg.target.url.startswith("e2e://") else _run_scan_background(session, cfg)
+        task_target = (
+            _run_e2e_scan_background(session, cfg)
+            if E2E_MODE and cfg.target.url.startswith("e2e://")
+            else _run_scan_background(
+                session,
+                cfg,
+                target_credential=target_credential,
+                attacker_credential=attacker_credential,
+            )
+        )
         task = asyncio.create_task(task_target, name=f"basilisk-scan-{session.id}")
         active_scans[session.id]["task"] = task
         return {"session_id": session.id, "status": "started"}
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(500, {"error": str(exc)})
+        raise HTTPException(500, {"error": sanitize_error_text(exc)})
 
 
 @router.post("/api/scan/{session_id}/stop", dependencies=[Depends(verify_token)])
@@ -192,12 +231,12 @@ async def resume_scan(session_id: str):
     db_path = runtime.get("db_path") or "./basilisk-sessions.db"
     session = await ScanSession.resume(session_id, db_path=db_path)
     cfg = session.config
-    cfg.target.api_key = cfg.target.api_key or get_api_key(cfg.target.provider)
-    if cfg.evolution.attacker_provider:
-        cfg.evolution.attacker_api_key = (
-            cfg.evolution.attacker_api_key
-            or get_api_key(cfg.evolution.attacker_provider)
-        )
+    target_credential = get_api_key(cfg.target.provider)
+    attacker_credential = (
+        get_api_key(cfg.evolution.attacker_provider)
+        if cfg.evolution.attacker_provider
+        else None
+    )
     errors = cfg.validate()
     if errors:
         raise HTTPException(400, {"errors": errors})
@@ -209,7 +248,7 @@ async def resume_scan(session_id: str):
         module
         for module in resolve_attack_modules(
             selected=cfg.modules,
-            include_research=cfg.include_research_modules,
+            include_research=cfg.research_modules_enabled,
         )
         if module.name not in completed_modules and cfg.policy.allows_module(module.name)
     ]
@@ -244,7 +283,13 @@ async def resume_scan(session_id: str):
         "policy": _policy_summary(cfg),
     }
     task = asyncio.create_task(
-        _run_scan_background(session, cfg, modules_override=resume_modules),
+        _run_scan_background(
+            session,
+            cfg,
+            modules_override=resume_modules,
+            target_credential=target_credential,
+            attacker_credential=attacker_credential,
+        ),
         name=f"basilisk-scan-{session.id}-resume",
     )
     active_scans[session.id]["task"] = task
@@ -318,6 +363,8 @@ async def _run_scan_background(
     cfg: BasiliskConfig,
     *,
     modules_override: list[Any] | None = None,
+    target_credential: str | None = None,
+    attacker_credential: str | None = None,
 ):
     sid = session.id
     completed = False
@@ -374,11 +421,12 @@ async def _run_scan_background(
             await broadcast("scan:finding", {"session_id": sid, "finding": finding.to_dict()})
 
         async def on_error(_: str, module_name: str, error: str) -> None:
-            logger.error("Module %s failed: %s", module_name, error)
+            safe_error = sanitize_error_text(error)
+            logger.error("Module %s failed: %s", module_name, safe_error)
             await session.save_runtime_state(
                 status=active_scans.get(sid, {}).get("status", "error"),
                 current_phase=session.current_phase,
-                last_error=f"{module_name}: {error}",
+                last_error=f"{module_name}: {safe_error}",
                 resumable=True,
             )
 
@@ -396,7 +444,7 @@ async def _run_scan_background(
         )
         modules = resolve_attack_modules(
             selected=cfg.modules,
-            include_research=cfg.include_research_modules,
+            include_research=cfg.research_modules_enabled,
         )
         await execute_scan(
             cfg,
@@ -404,6 +452,8 @@ async def _run_scan_background(
             hooks=hooks,
             modules=modules_override if modules_override is not None else modules,
             stop_check=ensure_active,
+            target_credential=target_credential,
+            attacker_credential=attacker_credential,
         )
         completed = True
     except asyncio.CancelledError:
@@ -419,16 +469,17 @@ async def _run_scan_background(
         )
         await broadcast("scan:error", {"session_id": sid, "error": "Scan stopped by user"})
     except Exception as exc:
-        logger.error("Scan %s failed: %s", sid, exc)
+        safe_error = sanitize_error_text(exc)
+        logger.error("Scan %s failed: %s", sid, safe_error)
         if sid in active_scans:
             active_scans[sid]["status"] = "error"
         await session.save_runtime_state(
             status="error",
             current_phase=session.current_phase or "error",
             resumable=True,
-            last_error=str(exc),
+            last_error=safe_error,
         )
-        await broadcast("scan:error", {"session_id": sid, "error": str(exc)})
+        await broadcast("scan:error", {"session_id": sid, "error": safe_error})
     finally:
         final_status = "completed" if completed else "stopped" if stopped else "error"
         try:
@@ -573,9 +624,12 @@ async def _run_e2e_scan_background(session: ScanSession, cfg: BasiliskConfig) ->
             status="error",
             current_phase=session.current_phase or "error",
             resumable=True,
-            last_error=str(exc),
+            last_error=sanitize_error_text(exc),
         )
-        await broadcast("scan:error", {"session_id": sid, "error": str(exc)})
+        await broadcast(
+            "scan:error",
+            {"session_id": sid, "error": sanitize_error_text(exc)},
+        )
     finally:
         final_status = "completed" if completed else "stopped" if stopped else "error"
         try:
@@ -615,8 +669,8 @@ async def start_diff_scan(config: DiffConfig):
         report = await run_differential(
             [
                 {
-                    **target,
-                    "api_key": target.get("api_key") or get_api_key(target.get("provider", "")),
+                    **target.model_dump(),
+                    "_credential": get_api_key(target.provider),
                 }
                 for target in config.targets
             ],
@@ -624,8 +678,10 @@ async def start_diff_scan(config: DiffConfig):
             verbose=False,
         )
         return report.to_dict()
+    except HTTPException:
+        raise
     except Exception as exc:
-        raise HTTPException(500, {"error": str(exc)})
+        raise HTTPException(500, {"error": sanitize_error_text(exc)})
 
 
 @router.post("/api/posture", dependencies=[Depends(verify_token)])
@@ -635,12 +691,15 @@ async def start_posture_scan(config: PostureConfig):
             target=config.target or "direct",
             provider=config.provider,
             model=config.model,
-            api_key=config.api_key or get_api_key(config.provider),
+            api_key="",
         )
         from basilisk.posture import run_posture_scan, save_posture_report
         from basilisk.runtime import create_provider
 
-        prov = create_provider(cfg)
+        prov = create_provider(
+            cfg,
+            credential_override=get_api_key(config.provider),
+        )
         try:
             report = await run_posture_scan(
                 prov,
@@ -656,5 +715,7 @@ async def start_posture_scan(config: PostureConfig):
         result = report.to_dict()
         result["report_path"] = path
         return result
+    except HTTPException:
+        raise
     except Exception as exc:
-        raise HTTPException(500, {"error": str(exc)})
+        raise HTTPException(500, {"error": sanitize_error_text(exc)})

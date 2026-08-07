@@ -163,8 +163,10 @@
                                     <option value="xai">xAI (Grok)</option>
                                     <option value="groq">Groq (Fast)</option>
                                     <option value="github">GitHub Models (Free)</option>
+                                    <option value="nvidia">NVIDIA API Catalog (Free Endpoint)</option>
                                     <option value="ollama">Ollama (Local)</option>
                                     <option value="custom">Custom HTTP</option>
+                                    <option value="websocket">Custom WebSocket</option>
                                 </select></div>
                             <div class="field"><label class="field-label">Model</label><input class="inp" id="s-model"
                                     list="attacker-model-list" placeholder="gpt-4o"></div>
@@ -241,6 +243,7 @@
                                             <option value="anthropic">Anthropic</option>
                                             <option value="google">Google AI</option>
                                             <option value="github">GitHub Models (Free)</option>
+                                            <option value="nvidia">NVIDIA API Catalog (Free Endpoint)</option>
                                             <option value="xai">xAI (Grok)</option>
                                             <option value="azure">Azure OpenAI</option>
                                             <option value="groq">Groq (Fast)</option>
@@ -258,6 +261,7 @@
                                             <option value="anthropic/claude-3-5-sonnet-20240620">Claude 3.5 Sonnet
                                             </option>
                                             <option value="github/gpt-4o">GitHub GPT-4o</option>
+                                            <option value="openai/gpt-oss-20b">NVIDIA GPT-OSS 20B</option>
                                         </datalist>
                                     </div>
                                 </div>
@@ -319,8 +323,14 @@
                                 </div>
                             </div>
                         </div>
+                        <div class="details-panel details-panel-lg mt-3" id="scan-cost-preview" aria-live="polite">
+                            <div class="field-label">Preflight cost preview</div>
+                            <div class="progress-label" id="scan-preview-summary">Calculate the plan before starting this scan.</div>
+                            <div class="progress-label" id="scan-preview-cost">No target request will be sent by preview.</div>
+                        </div>
                         <div class="action-row">
-                            <button class="btn primary block" id="btn-scan-start"><svg width="13" height="13"
+                            <button class="btn ghost block" id="btn-scan-preview">Calculate Plan</button>
+                            <button class="btn primary block" id="btn-scan-start" disabled><svg width="13" height="13"
                                     viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                     <polygon points="5 3 19 12 5 21 5 3" />
                                 </svg>Start Scan</button>
@@ -416,6 +426,23 @@
                                 <input class="inp" id="s-retain-days" type="number" value="30" min="0" max="365">
                             </div>
                         </div>
+                        <div class="field-row">
+                            <div class="field">
+                                <label class="field-label">Maximum Findings</label>
+                                <input class="inp" id="s-max-findings" type="number" value="0" min="0" max="10000">
+                            </div>
+                            <div class="field">
+                                <label class="field-label">Stop on Severity</label>
+                                <select class="sel" id="s-stop-on-severity">
+                                    <option value="" selected>Disabled</option>
+                                    <option value="critical">Critical</option>
+                                    <option value="high">High</option>
+                                    <option value="medium">Medium</option>
+                                    <option value="low">Low</option>
+                                    <option value="info">Info</option>
+                                </select>
+                            </div>
+                        </div>
                         <div class="field">
                             <label class="field-label">Scope Targets</label>
                             <input class="inp" id="s-scope-targets" placeholder="Comma-separated allowlist of approved targets">
@@ -461,6 +488,12 @@
                                 <label class="field-label field-inline-toggle">
                                     <input type="checkbox" id="s-retain-conversations" class="check">
                                     Retain conversations
+                                </label>
+                            </div>
+                            <div class="field field-auto">
+                                <label class="field-label field-inline-toggle">
+                                    <input type="checkbox" id="s-isolated-environment" class="check">
+                                    Isolated local lab
                                 </label>
                             </div>
                         </div>
@@ -739,6 +772,7 @@
                                     <option value="anthropic">Anthropic</option>
                                     <option value="google">Google</option>
                                     <option value="azure">Azure</option>
+                                    <option value="nvidia">NVIDIA</option>
                                     <option value="ollama">Ollama</option>
                                     <option value="github">GitHub</option>
                                 </select>
@@ -750,6 +784,7 @@
                                     <option value="anthropic" selected>Anthropic</option>
                                     <option value="google">Google</option>
                                     <option value="azure">Azure</option>
+                                    <option value="nvidia">NVIDIA</option>
                                     <option value="ollama">Ollama</option>
                                     <option value="github">GitHub</option>
                                 </select>
@@ -790,6 +825,7 @@
                                     <option value="anthropic">Anthropic</option>
                                     <option value="google">Google</option>
                                     <option value="azure">Azure</option>
+                                    <option value="nvidia">NVIDIA</option>
                                     <option value="ollama">Ollama</option>
                                 </select></div>
                             <div class="field"><label class="field-label">Model</label><input class="inp"
@@ -882,6 +918,11 @@
                             <div class="field"><label class="field-label">Groq</label><input class="inp"
                                     id="key-groq" type="password" placeholder="gsk_…"></div><button
                                 class="btn ghost sm" id="btn-save-key-groq">Save</button>
+                        </div>
+                        <div class="apikey-row">
+                            <div class="field"><label class="field-label">NVIDIA API Catalog</label><input class="inp"
+                                    id="key-nvidia" type="password" placeholder="nvapi-…"></div><button
+                                class="btn ghost sm" id="btn-save-key-nvidia">Save</button>
                         </div>
                     </div>
                     <div class="settings-section">

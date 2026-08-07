@@ -15,6 +15,7 @@ DEFAULT_MODELS: dict[str, str] = {
     "ollama": "ollama/llama3.1",
     "bedrock": "bedrock/anthropic.claude-3-sonnet",
     "github": "gpt-4o-mini",
+    "nvidia": "openai/gpt-oss-20b",
 }
 
 # Full model suggestions per provider (for UI dropdowns and CLI help)
@@ -44,6 +45,7 @@ MODEL_SUGGESTIONS: dict[str, list[str]] = {
     "bedrock": [
         "bedrock/anthropic.claude-3-sonnet", "bedrock/meta.llama3",
     ],
+    "nvidia": ["openai/gpt-oss-20b"],
 }
 
 # Provider name → required environment variable
@@ -56,4 +58,5 @@ PROVIDER_ENV_VARS: dict[str, str] = {
     "groq": "GROQ_API_KEY",
     "github": "GH_MODELS_TOKEN",
     "bedrock": "AWS_ACCESS_KEY_ID",
+    "nvidia": "NVIDIA_API_KEY",
 }

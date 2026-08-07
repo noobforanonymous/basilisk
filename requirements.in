@@ -1,0 +1,23 @@
+# Direct runtime and source-build dependencies for reproducible Basilisk
+# installations. Runtime entries must stay aligned with pyproject.toml.
+hatchling==1.31.0
+click>=8.3.3
+rich>=13.0.0
+httpx>=0.27.0
+litellm>=1.84.0
+pyyaml>=6.0
+fastapi>=0.141.1
+uvicorn[standard]>=0.30.0
+websockets>=12.0
+jinja2>=3.1.0
+pydantic>=2.7.0
+numpy>=1.26.0
+scikit-learn>=1.5.0
+tiktoken>=0.7.0
+cryptography>=48.0.1
+aiohttp>=3.14.3
+idna>=3.15
+pygments>=2.20.0
+requests>=2.33.0
+starlette>=1.3.1
+urllib3>=2.7.0

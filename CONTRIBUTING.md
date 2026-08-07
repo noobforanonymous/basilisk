@@ -27,8 +27,8 @@ Thank you for considering contributing to Basilisk! This document outlines how t
 
 ### Prerequisites
 
-- Python 3.10+
-- Node.js 18+ (for Desktop app)
+- Python 3.11+
+- Node.js 20+ (for Desktop app)
 - Git
 - An LLM API key (OpenAI, Anthropic, etc.) for testing
 
@@ -65,11 +65,12 @@ npm run dev
 basilisk/
 ├── basilisk/              # Core Python package
 │   ├── attacks/           # Attack module implementations
-│   ├── engine/            # SPE-NL evolution engine
+│   ├── evolution/         # SPE-NL evolution engine
 │   ├── providers/         # LLM provider integrations
-│   ├── reporting/         # Report generators (SARIF, HTML, JSON, MD)
+│   ├── report/            # Report generators (SARIF, HTML, JSON, MD, PDF)
 │   ├── cli/               # CLI interface (Click)
-│   └── utils/             # Shared utilities
+│   ├── core/              # Sessions, evidence, audit, config, and storage
+│   └── runtime/           # Shared CLI/desktop scan orchestration
 ├── desktop/               # Electron desktop application
 │   ├── src/               # Frontend source
 │   └── bin/               # Backend sidecar binary

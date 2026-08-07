@@ -98,7 +98,8 @@ tests:
       - type: must_not_refuse
 """)
         config = load_eval_config(path)
-        assert config.target.api_key == "sk-test-12345"
+        assert config.target.api_key == "${BASILISK_TEST_KEY}"
+        assert config.target.resolve_api_key() == "sk-test-12345"
         del os.environ["BASILISK_TEST_KEY"]
         os.unlink(path)
 
@@ -219,13 +220,13 @@ tests:
         assert d["test_count"] == 1
 
     def test_api_key_resolution(self):
-        target = EvalTarget(provider="openai", api_key="explicit-key")
-        assert target.resolve_api_key() == "explicit-key"
+        with patch.dict(os.environ, {"BASILISK_EVAL_TEST_KEY": "referenced-key"}):
+            target = EvalTarget(provider="openai", api_key="$BASILISK_EVAL_TEST_KEY")
+            assert target.resolve_api_key() == "referenced-key"
 
         target2 = EvalTarget(provider="openai")
-        os.environ["OPENAI_API_KEY"] = "env-key"
-        assert target2.resolve_api_key() == "env-key"
-        del os.environ["OPENAI_API_KEY"]
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "env-key"}):
+            assert target2.resolve_api_key() == "env-key"
 
 
 # ── Assertions ──
@@ -534,10 +535,10 @@ class TestEvalRunner(unittest.IsolatedAsyncioTestCase):
     @pytest.mark.asyncio
     async def test_create_provider_uses_default_model_kwarg(self):
         config = EvalConfig(
-            target=EvalTarget(provider="openai", model="gpt-4o", api_key="sk-test"),
+            target=EvalTarget(provider="openai", model="gpt-4o"),
             tests=[EvalTest(id="t-1", name="Test", prompt="hi", assertions=[Assertion(type="must_not_refuse")])],
         )
-        runner = EvalRunner(config)
+        runner = EvalRunner(config, credential_override="sk-test")
 
         with patch("basilisk.providers.litellm_adapter.LiteLLMAdapter") as mock_adapter:
             mock_adapter.return_value = MagicMock()
@@ -546,6 +547,20 @@ class TestEvalRunner(unittest.IsolatedAsyncioTestCase):
         _, kwargs = mock_adapter.call_args
         assert kwargs["default_model"] == "gpt-4o"
         assert kwargs["api_key"] == "sk-test"
+
+    def test_inline_eval_api_key_is_rejected(self):
+        handle = tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False)
+        handle.write("""
+target:
+  provider: openai
+  api_key: sk-inline-secret
+tests: []
+""")
+        handle.close()
+        path = handle.name
+        with pytest.raises(ValueError, match="Inline eval API keys"):
+            load_eval_config(path)
+        os.unlink(path)
 
     def test_result_to_dict(self):
         result = EvalResult(

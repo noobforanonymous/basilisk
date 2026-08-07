@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import os
 import asyncio
+import json
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -14,7 +15,7 @@ from fastapi import HTTPException
 from basilisk.api import shared
 from basilisk.api.sessions import clear_session_history
 from basilisk.api.settings import get_secret_store_status, save_api_key
-from basilisk.core.audit import AuditLogger
+from basilisk.core.audit import AuditLogger, verify_audit_log
 from basilisk.core.database import BasiliskDatabase
 from basilisk.core.retention import artifact_timestamp, prune_artifact_dir
 import basilisk.core.secrets as secrets_module
@@ -27,6 +28,25 @@ class TestSecretStore:
         store.set("OPENAI_API_KEY", "sk-test-123")
         assert store.get("OPENAI_API_KEY") == "sk-test-123"
         assert "OPENAI_API_KEY" in store.list_keys()
+
+    def test_secret_store_refuses_corrupt_ciphertext(self, tmp_path):
+        store = SecretStore(str(tmp_path / "secrets"))
+        store.set("OPENAI_API_KEY", "sk-test-123")
+        store._secrets_path.write_bytes(b"corrupt")
+        with pytest.raises(ValueError, match="could not decrypt"):
+            store.get("OPENAI_API_KEY")
+
+    def test_secret_store_reports_electron_safe_storage_key(self, tmp_path, monkeypatch):
+        key = secrets_module.Fernet.generate_key().decode("utf-8")
+        monkeypatch.setenv("BASILISK_MASTER_KEY", key)
+        monkeypatch.setenv("BASILISK_MASTER_KEY_SOURCE", "electron_safe_storage")
+
+        store = SecretStore(str(tmp_path / "secrets"))
+        store.set("NVIDIA_API_KEY", "nvapi-test-value")
+
+        assert store.get("NVIDIA_API_KEY") == "nvapi-test-value"
+        assert store.metadata()["key_backend"] == "electron_safe_storage"
+        assert b"nvapi-test-value" not in store._secrets_path.read_bytes()
 
     def test_prune_artifact_dir_removes_old_files(self, tmp_path):
         old_file = tmp_path / "basilisk_old.json"
@@ -78,6 +98,49 @@ class TestSecretStore:
 
         assert first_public
         assert first_public == second_public
+
+    def test_audit_log_verification_detects_tampering(self, tmp_path, monkeypatch):
+        pytest.importorskip("cryptography")
+        monkeypatch.setenv("BASILISK_SECRET_STORE_DIR", str(tmp_path / "secret-store"))
+        monkeypatch.setattr(secrets_module, "keyring", None)
+
+        audit = AuditLogger(output_dir=str(tmp_path), session_id="verified")
+        audit.log_policy_event("test", {"approved": True})
+        audit.close()
+        path = next(tmp_path.glob("audit_verified_*.jsonl"))
+
+        embedded_key = json.loads(path.read_text(encoding="utf-8").splitlines()[0])["data"]["public_key"]
+        unanchored = verify_audit_log(path)
+        assert not unanchored.valid
+        assert not unanchored.trust_anchored
+        assert any("external audit trust anchor" in error for error in unanchored.errors)
+
+        integrity_only = verify_audit_log(path, allow_embedded_key=True)
+        assert integrity_only.valid
+        assert not integrity_only.trust_anchored
+
+        verified = verify_audit_log(path, trusted_public_key=embedded_key)
+        assert verified.valid
+        assert verified.chain_valid
+        assert verified.signed
+        assert verified.signatures_valid
+        assert verified.trust_anchored
+
+        original = path.read_text(encoding="utf-8")
+        unsigned_lines = original.splitlines()
+        first_entry = json.loads(unsigned_lines[0])
+        first_entry.pop("signature")
+        unsigned_lines[0] = json.dumps(first_entry)
+        path.write_text("\n".join(unsigned_lines) + "\n", encoding="utf-8")
+        missing_signature = verify_audit_log(path, trusted_public_key=embedded_key)
+        assert not missing_signature.valid
+        assert not missing_signature.signatures_valid
+
+        content = original.replace('"approved": true', '"approved": false')
+        path.write_text(content, encoding="utf-8")
+        tampered = verify_audit_log(path, trusted_public_key=embedded_key)
+        assert not tampered.valid
+        assert not tampered.chain_valid
 
 
 class TestSettingsApi:

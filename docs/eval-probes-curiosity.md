@@ -14,7 +14,7 @@ The probe corpus is the shared payload database used by multiple parts of Basili
 
 Current totals from the codebase:
 
-- 223 probes in YAML
+- 263 probes in YAML, including typed single prompts, ordered turns, and role/content histories
 - 9 payload categories in the loader view
 
 Current category counts:

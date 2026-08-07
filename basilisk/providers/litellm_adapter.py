@@ -11,14 +11,22 @@ import logging
 import time
 from typing import Any, AsyncIterator
 
-import litellm
-
+from basilisk.core.redaction import sanitize_error_text
 from basilisk.providers.base import ProviderAdapter, ProviderMessage, ProviderResponse
 
 logger = logging.getLogger("basilisk.providers.litellm")
 
-# Suppress litellm's verbose logging
-litellm.suppress_debug_info = True
+def _load_litellm():
+    """Import LiteLLM only when a request needs it.
+
+    Recent LiteLLM versions initialize tokenizer data during import. Keeping
+    that work off CLI help, configuration, and desktop startup paths preserves
+    offline startup and read-only packaged installations.
+    """
+    import litellm
+
+    litellm.suppress_debug_info = True
+    return litellm
 
 
 class LiteLLMAdapter(ProviderAdapter):
@@ -117,6 +125,7 @@ class LiteLLMAdapter(ProviderAdapter):
 
         start = time.monotonic()
         try:
+            litellm = _load_litellm()
             response = await litellm.acompletion(**call_kwargs)
             latency = (time.monotonic() - start) * 1000
 
@@ -154,7 +163,7 @@ class LiteLLMAdapter(ProviderAdapter):
             return ProviderResponse(
                 content="",
                 latency_ms=latency,
-                error=str(e),
+                error=sanitize_error_text(e, secrets=(self._api_key,)),
             )
 
     async def send_streaming(
@@ -183,14 +192,16 @@ class LiteLLMAdapter(ProviderAdapter):
             call_kwargs["api_base"] = self._api_base
 
         try:
+            litellm = _load_litellm()
             response = await litellm.acompletion(**call_kwargs)
             async for chunk in response:
                 delta = chunk.choices[0].delta
                 if delta and delta.content:
                     yield delta.content
         except Exception as e:
-            logger.warning(f"Streaming error: {e}")
-            return
+            safe_error = sanitize_error_text(e, secrets=(self._api_key,))
+            logger.warning("Streaming error: %s", safe_error)
+            raise RuntimeError(safe_error) from None
 
     async def send_with_tools(
         self,

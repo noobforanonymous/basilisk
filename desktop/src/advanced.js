@@ -11,7 +11,7 @@ function diffRow(idx) {
     return `
         <select class="sel diff-target-select" id="diff-prov-${idx}">
             <option value="openai">OpenAI</option><option value="anthropic">Anthropic</option>
-            <option value="google" ${idx === 2 ? 'selected' : ''}>Google</option><option value="xai">xAI (Grok)</option><option value="azure">Azure</option><option value="ollama">Ollama</option>
+            <option value="google" ${idx === 2 ? 'selected' : ''}>Google</option><option value="nvidia">NVIDIA</option><option value="xai">xAI (Grok)</option><option value="azure">Azure</option><option value="ollama">Ollama</option>
         </select>
         <input class="inp flex-fill" id="diff-model-${idx}" placeholder="${idx === 2 ? 'gemini/gemini-2.0-flash' : ''}">
         <button class="btn ghost sm diff-target-remove" type="button">✗</button>
@@ -25,7 +25,7 @@ async function runDifferential() {
         const idx = row.dataset.idx;
         const provider = document.getElementById(`diff-prov-${idx}`)?.value;
         const model = document.getElementById(`diff-model-${idx}`)?.value || '';
-        if (provider) targets.push({ provider, model, api_key: '' });
+        if (provider) targets.push({ provider, model });
     });
 
     if (targets.length < 2) {
@@ -73,7 +73,7 @@ async function runPosture() {
     log('inf', `Running posture scan: ${provider}/${model || 'default'}…`);
 
     try {
-        const result = await apiFetch('/api/posture', { method: 'POST', body: { target: '', provider, model, api_key: '' } });
+        const result = await apiFetch('/api/posture', { method: 'POST', body: { target: '', provider, model } });
         if (result.error) {
             log('err', result.error);
             return;

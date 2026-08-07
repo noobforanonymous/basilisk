@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 
 from basilisk.api.shared import CuriosityExploreRequest, EvalRunConfig, _eval_results, get_api_key, verify_token
+from basilisk.core.redaction import sanitize_error_text
 
 router = APIRouter()
 
@@ -31,7 +32,7 @@ async def list_probes(
             "probes": [p.to_dict() for p in results[:limit]],
         }
     except Exception as exc:
-        raise HTTPException(500, {"error": str(exc)})
+        raise HTTPException(500, {"error": sanitize_error_text(exc)})
 
 
 @router.get("/api/probes/stats", dependencies=[Depends(verify_token)])
@@ -40,7 +41,7 @@ async def probes_statistics():
         from basilisk.payloads.loader import probe_stats
         return probe_stats()
     except Exception as exc:
-        raise HTTPException(500, {"error": str(exc)})
+        raise HTTPException(500, {"error": sanitize_error_text(exc)})
 
 
 @router.post("/api/eval/run", dependencies=[Depends(verify_token)])
@@ -61,9 +62,6 @@ async def run_eval(config: EvalRunConfig):
         else:
             raise HTTPException(400, {"error": "Provide config_path or config_yaml"})
 
-        if not eval_cfg.target.api_key:
-            eval_cfg.target.api_key = get_api_key(eval_cfg.target.provider)
-
         if config.tags:
             filtered = eval_cfg.filter_by_tags(config.tags)
             eval_cfg = eval_cfg.__class__(
@@ -73,7 +71,11 @@ async def run_eval(config: EvalRunConfig):
                 metadata=eval_cfg.metadata,
             )
 
-        runner = EvalRunner(eval_cfg, parallel=config.parallel)
+        runner = EvalRunner(
+            eval_cfg,
+            parallel=config.parallel,
+            credential_override=get_api_key(eval_cfg.target.provider),
+        )
         result = await runner.run()
 
         if config.output_format == "json":
@@ -96,8 +98,10 @@ async def run_eval(config: EvalRunConfig):
         }
     except HTTPException:
         raise
+    except ValueError as exc:
+        raise HTTPException(400, {"error": sanitize_error_text(exc)}) from exc
     except Exception as exc:
-        raise HTTPException(500, {"error": str(exc)})
+        raise HTTPException(500, {"error": sanitize_error_text(exc)})
 
 
 @router.get("/api/eval/results", dependencies=[Depends(verify_token)])
@@ -136,7 +140,7 @@ async def curiosity_stats():
             ],
         }
     except Exception as exc:
-        return {"available": False, "error": str(exc)}
+        return {"available": False, "error": sanitize_error_text(exc)}
 
 
 @router.post("/api/curiosity/explore", dependencies=[Depends(verify_token)])
@@ -159,7 +163,7 @@ async def curiosity_explore(req: CuriosityExploreRequest):
             "stats": space.stats(),
         }
     except Exception as exc:
-        raise HTTPException(500, {"error": str(exc)})
+        raise HTTPException(500, {"error": sanitize_error_text(exc)})
 
 
 @router.get("/api/probes/effectiveness/{probe_id}", dependencies=[Depends(verify_token)])
@@ -168,7 +172,7 @@ async def get_probe_effectiveness(probe_id: str):
         from basilisk.payloads.effectiveness import probe_effectiveness
         return probe_effectiveness(probe_id)
     except Exception as exc:
-        raise HTTPException(500, {"error": str(exc)})
+        raise HTTPException(500, {"error": sanitize_error_text(exc)})
 
 
 @router.get("/api/probes/effectiveness", dependencies=[Depends(verify_token)])
@@ -177,7 +181,7 @@ async def get_effectiveness_summary():
         from basilisk.payloads.effectiveness import stats_summary
         return stats_summary()
     except Exception as exc:
-        raise HTTPException(500, {"error": str(exc)})
+        raise HTTPException(500, {"error": sanitize_error_text(exc)})
 
 
 @router.get("/api/probes/leaderboard", dependencies=[Depends(verify_token)])
@@ -186,7 +190,7 @@ async def get_probe_leaderboard(category: str = ""):
         from basilisk.payloads.effectiveness import category_leaderboard
         return {"probes": category_leaderboard(category)}
     except Exception as exc:
-        raise HTTPException(500, {"error": str(exc)})
+        raise HTTPException(500, {"error": sanitize_error_text(exc)})
 
 
 @router.get("/api/models/{provider}/{model}/effectiveness", dependencies=[Depends(verify_token)])
@@ -195,4 +199,4 @@ async def get_model_effectiveness(provider: str, model: str):
         from basilisk.payloads.effectiveness import model_effectiveness
         return model_effectiveness(provider, model)
     except Exception as exc:
-        raise HTTPException(500, {"error": str(exc)})
+        raise HTTPException(500, {"error": sanitize_error_text(exc)})

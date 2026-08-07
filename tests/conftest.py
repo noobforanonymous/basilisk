@@ -3,6 +3,7 @@ Basilisk test configuration and shared fixtures.
 """
 
 import pytest
+import os
 import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
@@ -13,6 +14,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from basilisk.providers.base import ProviderResponse, ProviderMessage, ProviderAdapter
 from basilisk.core.profile import BasiliskProfile
 from basilisk.core.finding import Finding, Severity, AttackCategory
+
+
+# Unit tests exercise scan functions in-process; dedicated isolation tests cover
+# the real child-worker boundary separately.
+os.environ.setdefault("BASILISK_DISABLE_PROCESS_ISOLATION", "1")
 
 
 # ============================================================

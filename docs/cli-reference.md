@@ -11,6 +11,7 @@ Current commands:
 - `replay`
 - `modules`
 - `probes`
+- `auth-test`
 - `interactive`
 - `sessions`
 - `diff`
@@ -18,6 +19,10 @@ Current commands:
 - `version`
 - `help`
 - `eval`
+
+Provider values include `openai`, `anthropic`, `google`, `azure`, `nvidia`,
+`ollama`, `github`, `custom`, and `websocket`. NVIDIA credentials are resolved
+from `NVIDIA_API_KEY` and default to model `openai/gpt-oss-20b`.
 
 ## `basilisk scan`
 
@@ -35,8 +40,11 @@ Important options:
 | `-p, --provider` | Target provider |
 | `-m, --model` | Target model override |
 | `-k, --api-key` | API key file reference such as `@/path/to/key` |
-| `--auth` | Authorization header value |
+| `--auth` | Authorization header file reference; alternatively use `BASILISK_AUTH_HEADER` |
 | `--mode` | `quick`, `standard`, `deep`, `stealth`, `chaos` |
+| `--cost-preview` | Calculate the bounded request/token/cost plan and exit without transmitting |
+| `--input-price-per-million` | Optional provider input-token rate used for the USD preview |
+| `--output-price-per-million` | Optional provider output-token rate used for the USD preview |
 | `--evolve / --no-evolve` | Enable or disable the evolution engine |
 | `--generations` | Evolution generations |
 | `--module` | Repeatable module selector |
