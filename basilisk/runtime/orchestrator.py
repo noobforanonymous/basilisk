@@ -16,12 +16,19 @@ from basilisk.campaign import build_attack_graph, should_use_attack_graph, stage
 from basilisk.core.audit import AuditLogger
 from basilisk.core.config import BasiliskConfig
 from basilisk.core.finding import AttackCategory, Finding, Severity
+from basilisk.core.redaction import sanitize_error_text
 from basilisk.core.session import ScanSession
+from basilisk.core.verification import verify_candidate
 from basilisk.policy import ExecutionMode
 from basilisk.providers.base import ProviderAdapter
 from basilisk.providers.custom_http import CustomHTTPAdapter
-from basilisk.providers.litellm_adapter import LiteLLMAdapter
 from basilisk.providers.websocket import WebSocketAdapter
+from basilisk.providers.nvidia import NVIDIAAdapter
+from basilisk.runtime.request_engine import RequestExecutor, RequestLedger, request_module_context
+from basilisk.runtime.destination_policy import DestinationPolicy
+
+
+_EVOLUTION_RANDOM_LOCK = asyncio.Lock()
 
 
 PhaseHook = Callable[[str, str], Any | Awaitable[Any]]
@@ -45,33 +52,124 @@ class ScanHooks:
     on_evolution_stats: EvolutionHook | None = None
 
 
-def create_provider(cfg: BasiliskConfig) -> ProviderAdapter:
-    """Create the appropriate provider adapter from config."""
+def _create_raw_provider(
+    cfg: BasiliskConfig,
+    *,
+    credential_override: str | None = None,
+    auth_header_override: str | None = None,
+    custom_headers_override: dict[str, str] | None = None,
+) -> ProviderAdapter:
+    """Create a protocol adapter without scan-wide request governance."""
 
+    destination_policy = DestinationPolicy(
+        allow_private=cfg.policy.allow_private_targets or cfg.policy.isolated_environment,
+        allow_insecure_http=cfg.policy.allow_insecure_http or cfg.policy.isolated_environment,
+        allowed_hosts=tuple(cfg.policy.allowed_hosts),
+        max_redirects=cfg.policy.max_redirects,
+    )
+    max_response_bytes = cfg.request_policy().max_response_bytes
+
+    if cfg.target.provider == "websocket" or cfg.target.url.startswith(("ws://", "wss://")):
+        return WebSocketAdapter(
+            ws_url=cfg.target.url,
+            auth_header=(
+                auth_header_override
+                if auth_header_override is not None
+                else cfg.target.resolve_auth_header()
+            ),
+            custom_headers=(
+                dict(custom_headers_override)
+                if custom_headers_override is not None
+                else cfg.target.resolve_custom_headers()
+            ),
+            timeout=cfg.target.timeout,
+            destination_policy=destination_policy,
+            max_response_bytes=max_response_bytes,
+        )
     if cfg.target.provider == "custom":
         return CustomHTTPAdapter(
             base_url=cfg.target.url,
-            auth_header=cfg.target.auth_header,
-            custom_headers=cfg.target.custom_headers,
+            auth_header=(
+                auth_header_override
+                if auth_header_override is not None
+                else cfg.target.resolve_auth_header()
+            ),
+            custom_headers=(
+                dict(custom_headers_override)
+                if custom_headers_override is not None
+                else cfg.target.resolve_custom_headers()
+            ),
             timeout=cfg.target.timeout,
+            destination_policy=destination_policy,
+            max_response_bytes=max_response_bytes,
         )
-    if cfg.target.url.startswith("ws://") or cfg.target.url.startswith("wss://"):
-        return WebSocketAdapter(
-            ws_url=cfg.target.url,
-            auth_header=cfg.target.auth_header,
-            custom_headers=cfg.target.custom_headers,
+    if cfg.target.provider == "nvidia":
+        return NVIDIAAdapter(
+            api_key=(
+                credential_override
+                if credential_override is not None
+                else cfg.target.resolve_api_key()
+            ),
+            default_model=cfg.target.model,
             timeout=cfg.target.timeout,
+            max_response_bytes=max_response_bytes,
         )
-
     api_base = cfg.target.url if cfg.target.provider == "custom" else None
+    from basilisk.providers.litellm_adapter import LiteLLMAdapter
+
+    runtime_headers = (
+        dict(custom_headers_override)
+        if custom_headers_override is not None
+        else cfg.target.resolve_custom_headers()
+    )
+    runtime_auth_header = (
+        auth_header_override
+        if auth_header_override is not None
+        else cfg.target.resolve_auth_header()
+    )
+    if runtime_auth_header:
+        runtime_headers["Authorization"] = runtime_auth_header
+
     return LiteLLMAdapter(
-        api_key=cfg.target.resolve_api_key(),
+        api_key=(
+            credential_override
+            if credential_override is not None
+            else cfg.target.resolve_api_key()
+        ),
         api_base=api_base,
         provider=cfg.target.provider,
         default_model=cfg.target.model,
         timeout=cfg.target.timeout,
         max_retries=cfg.target.max_retries,
-        custom_headers=cfg.target.custom_headers or None,
+        custom_headers=runtime_headers or None,
+    )
+
+
+def create_provider(
+    cfg: BasiliskConfig,
+    *,
+    namespace: str = "scan",
+    audit: AuditLogger | None = None,
+    stop_check: StopCheck | None = None,
+    ledger: RequestLedger | None = None,
+    credential_override: str | None = None,
+    auth_header_override: str | None = None,
+    custom_headers_override: dict[str, str] | None = None,
+) -> ProviderAdapter:
+    """Create a provider wrapped by the central request policy engine."""
+    return RequestExecutor(
+        _create_raw_provider(
+            cfg,
+            credential_override=credential_override,
+            auth_header_override=auth_header_override,
+            custom_headers_override=custom_headers_override,
+        ),
+        cfg.request_policy(),
+        namespace=namespace,
+        audit=audit,
+        target=cfg.target.url,
+        stop_check=stop_check,
+        ledger=ledger,
     )
 
 
@@ -83,6 +181,8 @@ async def execute_scan(
     audit: AuditLogger | None = None,
     modules: list[BasiliskAttack] | None = None,
     stop_check: StopCheck | None = None,
+    target_credential: str | None = None,
+    attacker_credential: str | None = None,
 ) -> ScanSession:
     """Run the shared scan pipeline for CLI and desktop callers."""
 
@@ -94,7 +194,23 @@ async def execute_scan(
         await session.initialize()
         own_session = True
 
-    prov = create_provider(cfg)
+    def governed_stop_check() -> None:
+        if stop_check:
+            stop_check()
+        session.check_continue()
+
+    request_ledger = RequestLedger(
+        cfg.request_policy(),
+        random_seed=cfg.evolution.random_seed,
+    )
+    prov = create_provider(
+        cfg,
+        namespace="scan",
+        audit=audit,
+        stop_check=governed_stop_check,
+        ledger=request_ledger,
+        credential_override=target_credential,
+    )
     attacker_prov = None
     try:
         session.record_phase(
@@ -121,7 +237,7 @@ async def execute_scan(
         if not healthy:
             raise RuntimeError(f"Provider health check failed: {error_msg}")
 
-        if cfg.skip_recon or cfg.mode.value == "quick":
+        if cfg.skip_recon or not cfg.mode_profile.run_recon:
             session.record_phase("recon_skipped")
             await _emit_phase(hooks, session.id, "recon_skipped")
         else:
@@ -135,7 +251,7 @@ async def execute_scan(
                 dry_run=cfg.policy.dry_run,
                 selected_modules=_module_names(resolve_attack_modules(
                     selected=cfg.modules,
-                    include_research=cfg.include_research_modules,
+                    include_research=cfg.research_modules_enabled,
                 )),
             )
             if audit:
@@ -150,12 +266,14 @@ async def execute_scan(
         await _emit_phase(hooks, session.id, "attacking")
         selected_modules = modules if modules is not None else resolve_attack_modules(
             selected=cfg.modules,
-            include_research=cfg.include_research_modules,
+            include_research=cfg.research_modules_enabled,
         )
         selected_modules = [
             module for module in selected_modules
             if cfg.policy.allows_module(module.name)
         ]
+        for module in selected_modules:
+            module.probe_filter = tuple(cfg.probe_ids)
         selected_modules = _prioritize_modules(selected_modules, session)
         if should_use_attack_graph(session):
             graph = build_attack_graph(session, selected_modules)
@@ -189,7 +307,7 @@ async def execute_scan(
             )
 
         _check_continue(stop_check)
-        if cfg.evolution.enabled and cfg.mode.value in ("standard", "deep", "chaos") and cfg.policy.should_run_evolution():
+        if cfg.evolution.enabled and cfg.mode_profile.run_evolution and cfg.policy.should_run_evolution():
             session.record_phase("evolution_started")
             await _emit_phase(hooks, session.id, "evolving")
             attacker_prov = await _run_evolution_phase(
@@ -198,6 +316,8 @@ async def execute_scan(
                 cfg,
                 hooks=hooks,
                 stop_check=stop_check,
+                request_ledger=request_ledger,
+                attacker_credential=attacker_credential,
             )
 
         return session
@@ -208,7 +328,13 @@ async def execute_scan(
         final_status = "error"
         raise
     finally:
+        await session.finalize_findings()
+        if isinstance(prov, RequestExecutor):
+            session.remember("request_stats", prov.stats.to_dict())
+            session.remember("scan_request_stats", request_ledger.stats.to_dict())
         if attacker_prov:
+            if isinstance(attacker_prov, RequestExecutor):
+                session.remember("attacker_request_stats", attacker_prov.stats.to_dict())
             await attacker_prov.close()
         await prov.close()
         if own_session and session.finished_at is None:
@@ -290,38 +416,45 @@ async def _run_attack_phase(
     if not modules:
         return
 
-    sem = asyncio.Semaphore(max(1, session.config.policy.max_concurrency))
+    sem = asyncio.Semaphore(
+        max(1, min(session.config.policy.max_concurrency, session.config.mode_profile.max_concurrency))
+    )
     completed = 0
-    request_budget = session.config.policy.request_budget
 
     async def run_module(mod: BasiliskAttack) -> None:
-        nonlocal completed, request_budget
+        nonlocal completed
         async with sem:
             _check_continue(stop_check)
-            if request_budget == 0 and session.config.policy.request_budget > 0:
-                await _emit_error(hooks, session.id, mod.name, "Request budget exhausted before module execution")
-                return
-            if request_budget > 0:
-                request_budget -= 1
             await _emit_progress(hooks, session.id, f"Running {mod.name}...", completed / len(modules))
             try:
                 session.record_phase("module_started", module=mod.name)
                 session.remember("completed_modules", mod.name)
                 if session.config.policy.rate_limit_delay > 0:
                     await asyncio.sleep(session.config.policy.rate_limit_delay)
-                module_findings = await mod.execute(prov, session, session.profile)
+                with request_module_context(mod.name):
+                    module_findings = await mod.execute(prov, session, session.profile)
                 for finding in module_findings:
+                    if finding.severity in {Severity.HIGH, Severity.CRITICAL}:
+                        await verify_candidate(prov, finding)
+                    await session.reassess_finding(finding, final=True)
                     if audit:
-                        audit.log_finding(finding.to_dict())
+                        signed_entry = audit.log_finding(finding.to_dict())
+                        if signed_entry:
+                            finding.metadata["signed_verification"] = {
+                                key: signed_entry.get(key, "")
+                                for key in ("seq", "checksum", "signature")
+                            }
+                            await session.reassess_finding(finding, final=True)
                     await _emit_finding(hooks, session.id, finding)
                 session.record_phase("module_completed", module=mod.name, findings=len(module_findings))
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                await session.add_error(mod.name, str(exc))
+                safe_error = sanitize_error_text(exc)
+                await session.add_error(mod.name, safe_error)
                 if audit:
-                    audit.log_error(mod.name, str(exc))
-                await _emit_error(hooks, session.id, mod.name, str(exc))
+                    audit.log_error(mod.name, safe_error)
+                await _emit_error(hooks, session.id, mod.name, safe_error)
             finally:
                 completed += 1
                 await _emit_progress(hooks, session.id, mod.name, completed / len(modules))
@@ -380,19 +513,29 @@ async def _run_evolution_phase(
     *,
     hooks: ScanHooks,
     stop_check: StopCheck | None = None,
+    seed_payloads: list[str] | None = None,
+    request_ledger: RequestLedger | None = None,
+    attacker_credential: str | None = None,
 ) -> ProviderAdapter | None:
     from basilisk.evolution.engine import EvolutionEngine
     from basilisk.evolution.fitness import attack_goal_from_payloads
     from basilisk.core.refusal import classify_refusal_style
 
-    seed_payloads = [finding.payload for finding in session.findings if finding.payload][:50]
-    if not seed_payloads:
-        from basilisk.attacks.injection.direct import PAYLOADS
+    selected_seed_payloads = list(seed_payloads or [])
+    if not selected_seed_payloads:
+        selected_seed_payloads = [
+            finding.payload for finding in session.findings if finding.payload
+        ][:50]
+    if not selected_seed_payloads:
+        from basilisk.payloads.loader import probes_as_seed_population
 
-        seed_payloads = PAYLOADS
+        selected_seed_payloads = probes_as_seed_population(
+            category="injection",
+            limit=50,
+        )
 
     goal = attack_goal_from_payloads(
-        seed_payloads,
+        selected_seed_payloads,
         description="Bypass AI safety guardrails with probe-aligned proof",
         fallback_category="injection",
     )
@@ -437,10 +580,23 @@ async def _run_evolution_phase(
             cfg.target,
             provider=cfg.evolution.attacker_provider,
             model=cfg.evolution.attacker_model,
-            api_key=cfg.evolution.attacker_api_key or cfg.target.api_key,
+            api_key=(
+                cfg.evolution.attacker_api_key
+                or (
+                    cfg.target.api_key
+                    if cfg.evolution.attacker_provider == cfg.target.provider
+                    else ""
+                )
+            ),
         )
         attacker_cfg = replace(cfg, target=attacker_target)
-        attacker_prov = create_provider(attacker_cfg)
+        attacker_prov = create_provider(
+            attacker_cfg,
+            namespace="attacker",
+            stop_check=stop_check,
+            ledger=request_ledger,
+            credential_override=attacker_credential,
+        )
 
     engine = EvolutionEngine(
         prov,
@@ -450,9 +606,22 @@ async def _run_evolution_phase(
         attacker_provider=attacker_prov,
         target_context=target_context,
     )
-    result = await engine.evolve(seed_payloads, goal)
+    import random
+
+    async with _EVOLUTION_RANDOM_LOCK:
+        previous_random_state = random.getstate()
+        random.seed(cfg.evolution.random_seed)
+        try:
+            result = await engine.evolve(selected_seed_payloads, goal)
+        finally:
+            random.setstate(previous_random_state)
 
     session.remember("operator_learning", result.operator_learning)
+    session.remember("evolution_reproducibility", {
+        "random_seed": result.random_seed,
+        "lineage": result.lineage,
+        "generation_stats": result.generation_stats,
+    })
     if result.best_individual and result.best_individual.behavioral_profile:
         refusal_style = result.best_individual.behavioral_profile.get("refusal_style")
         if refusal_style:

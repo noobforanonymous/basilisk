@@ -7,6 +7,7 @@ resume capability, and real-time event broadcasting.
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Callable
@@ -49,6 +50,8 @@ class ScanSession:
         self.phase_history: list[dict[str, Any]] = []
         self.last_progress: dict[str, Any] = {}
         self.last_error: str = ""
+        self.stop_requested: bool = False
+        self.stop_reason: str = ""
         self.attack_memory: dict[str, Any] = {
             "discovered_tools": [],
             "guardrail_level": "",
@@ -100,8 +103,50 @@ class ScanSession:
         """Add a finding and persist it."""
         from basilisk.policy.finding import enforce_finding_policy
 
-        finding = enforce_finding_policy(finding, self.config.policy)
+        if self.config.max_findings and len(self.findings) >= self.config.max_findings:
+            self.stop_requested = True
+            self.stop_reason = f"maximum findings reached ({self.config.max_findings})"
+            return
+        finding = enforce_finding_policy(finding, self.config.policy, final=False)
+        finding.metadata = {
+            **finding.metadata,
+            "target_configuration": {
+                "provider": self.config.target.provider,
+                "model": self.config.target.model,
+                "target_sha256": __import__("hashlib").sha256(
+                    self.config.target.url.encode("utf-8", errors="replace")
+                ).hexdigest(),
+            },
+            "random_seed": self.config.evolution.random_seed,
+        }
         self.findings.append(finding)
+        if finding.evidence:
+            verdict = finding.evidence.verdict.value
+            self.attack_memory.setdefault("evidence_verdict_counts", {})
+            counts = self.attack_memory["evidence_verdict_counts"]
+            counts[verdict] = counts.get(verdict, 0) + 1
+        if self.config.max_findings and len(self.findings) >= self.config.max_findings:
+            self.stop_requested = True
+            self.stop_reason = f"maximum findings reached ({self.config.max_findings})"
+        await self._persist_finding(finding)
+        await self._emit("finding", finding)
+
+    async def reassess_finding(self, finding: Finding, *, final: bool = True) -> None:
+        """Apply final evidence policy after replay and persist the updated result."""
+        from basilisk.policy.finding import enforce_finding_policy
+
+        enforce_finding_policy(finding, self.config.policy, final=final)
+        threshold = self.config.policy.stop_on_severity.strip().casefold()
+        severity_order = {"info": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
+        if (
+            threshold in severity_order
+            and finding.validation_level.value == "verified"
+            and finding.severity.numeric >= severity_order[threshold]
+        ):
+            self.stop_requested = True
+            self.stop_reason = (
+                f"finding {finding.id} reached stop severity {threshold}"
+            )
         if finding.metadata.get("policy_downgraded"):
             self.remember("policy_events", {
                 "type": "finding_downgraded",
@@ -110,6 +155,15 @@ class ScanSession:
                 "required": finding.metadata.get("required_evidence_verdict"),
                 "actual": finding.metadata.get("actual_evidence_verdict"),
             })
+        await self._persist_finding(finding)
+        await self._emit("finding_updated", finding)
+
+    async def finalize_findings(self) -> None:
+        """Ensure no unverified high-impact result leaves the scan as confirmed."""
+        for finding in self.findings:
+            await self.reassess_finding(finding, final=True)
+
+    async def _persist_finding(self, finding: Finding) -> None:
         if self._db:
             await self._db.save_finding(
                 self.id,
@@ -119,12 +173,10 @@ class ScanSession:
                     include_conversation=self.config.persist_conversations,
                 ),
             )
-        if finding.evidence:
-            verdict = finding.evidence.verdict.value
-            self.attack_memory.setdefault("evidence_verdict_counts", {})
-            counts = self.attack_memory["evidence_verdict_counts"]
-            counts[verdict] = counts.get(verdict, 0) + 1
-        await self._emit("finding", finding)
+    def check_continue(self) -> None:
+        """Raise cancellation once an operator or finding policy requests a stop."""
+        if self.stop_requested:
+            raise asyncio.CancelledError(self.stop_reason or "scan stop requested")
 
     async def add_error(self, module: str, error: str, severity: str = "error") -> None:
         """Add a module-level error and persist it."""

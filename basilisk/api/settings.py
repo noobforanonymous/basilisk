@@ -21,8 +21,9 @@ router = APIRouter()
 async def save_api_key(req: ApiKeyRequest):
     env_var = _PROVIDER_ENV_MAP.get(req.provider)
     if env_var:
-        _api_key_store[env_var] = req.key
-        shared._secret_store.set(env_var, req.key)
+        value = req.key.get_secret_value()
+        _api_key_store[env_var] = value
+        shared._secret_store.set(env_var, value)
         return {"status": "saved", "provider": req.provider}
     raise HTTPException(400, {"error": f"Unknown provider: {req.provider}"})
 

@@ -1,0 +1,16 @@
+services:
+  basilisk-lab:
+    build: .
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,noexec,nosuid
+    ports:
+      - "127.0.0.1:8765:8765"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 256m
+    cpus: 1.0
+    pids_limit: 64
+    restart: "no"

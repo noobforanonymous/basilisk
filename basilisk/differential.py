@@ -21,9 +21,17 @@ from rich.text import Text
 from basilisk.core.config import BasiliskConfig, TargetConfig
 from basilisk.core.finding import Finding, Severity, AttackCategory
 from basilisk.core.profile import BasiliskProfile
+from basilisk.core.redaction import (
+    public_fields,
+    redacted_descriptor,
+    sanitize_error_text,
+    sha256_text,
+)
 from basilisk.core.session import ScanSession
 from basilisk.providers.base import ProviderAdapter, ProviderMessage
-from basilisk.providers.litellm_adapter import LiteLLMAdapter
+from basilisk.policy.models import ScanPolicy
+from basilisk.runtime.orchestrator import create_provider
+from basilisk.runtime.request_engine import RequestLedger
 
 console = Console()
 
@@ -74,6 +82,7 @@ class DiffReport:
     probe_results: list[DiffProbeResult] = field(default_factory=list)
     started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     finished_at: datetime | None = None
+    request_stats: dict[str, Any] = field(default_factory=dict)
 
     @property
     def total_divergences(self) -> int:
@@ -83,14 +92,18 @@ class DiffReport:
     def total_probes(self) -> int:
         return len(self.probe_results)
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self, *, include_raw_content: bool = False) -> dict[str, Any]:
         return {
-            "targets": self.targets,
+            "targets": [
+                public_fields(target, ("provider", "model", "target_id"))
+                for target in self.targets
+            ],
             "total_probes": self.total_probes,
             "total_divergences": self.total_divergences,
             "divergence_rate": f"{(self.total_divergences / max(self.total_probes, 1)) * 100:.1f}%",
             "started_at": self.started_at.isoformat(),
             "finished_at": self.finished_at.isoformat() if self.finished_at else None,
+            "request_stats": self.request_stats,
             "probes": [
                 {
                     "category": p.probe_category,
@@ -102,10 +115,14 @@ class DiffReport:
                         {
                             "provider": r.provider,
                             "model": r.model,
-                            "response_preview": r.response[:300],
+                            "response_preview": (
+                                r.response if include_raw_content else redacted_descriptor(r.response)
+                            ),
+                            "response_sha256": sha256_text(r.response) if r.response else "",
+                            "response_length": len(r.response),
                             "was_refusal": r.was_refusal,
                             "latency_ms": round(r.latency_ms, 2),
-                            "error": r.error,
+                            "error": sanitize_error_text(r.error),
                         }
                         for r in p.results
                     ],
@@ -172,7 +189,7 @@ async def _probe_model(
         if resp.error:
             return ModelResult(
                 provider=provider_name, model=model_name,
-                error=resp.error, latency_ms=latency,
+                error=sanitize_error_text(resp.error), latency_ms=latency,
             )
 
         return ModelResult(
@@ -185,7 +202,7 @@ async def _probe_model(
         latency = (time.monotonic() - start) * 1000
         return ModelResult(
             provider=provider_name, model=model_name,
-            error=str(e), latency_ms=latency,
+            error=sanitize_error_text(e), latency_ms=latency,
         )
 
 
@@ -198,7 +215,9 @@ async def run_differential(
     Run a differential scan across multiple models.
 
     Args:
-        targets: List of dicts with 'provider', 'model', and optionally 'api_key'.
+        targets: List of dicts with 'provider', 'model', and optionally an
+                 ``api_key`` environment/file reference. Internal callers may
+                 pass a short-lived ``_credential`` that is never reported.
                  Example: [{"provider": "openai", "model": "gpt-4"},
                            {"provider": "anthropic", "model": "claude-3-5-sonnet-20241022"}]
         categories: Optional list of probe categories to run.
@@ -207,16 +226,36 @@ async def run_differential(
     Returns:
         DiffReport with side-by-side comparison results.
     """
-    report = DiffReport(targets=targets)
+    report = DiffReport(
+        targets=[public_fields(target, ("provider", "model", "target_id")) for target in targets]
+    )
 
     # Create provider adapters
     adapters: list[tuple[str, str, ProviderAdapter]] = []
+    scan_policy = ScanPolicy(
+        request_budget=max(1, len(DIFF_PROBES) * 20),
+        max_concurrency=max(1, len(targets)),
+    )
+    ledger = RequestLedger(BasiliskConfig(policy=scan_policy).request_policy())
     try:
         for t in targets:
-            adapter = LiteLLMAdapter(
-                api_key=t.get("api_key", ""),
-                provider=t["provider"],
-                default_model=t.get("model", ""),
+            api_key_reference = str(t.get("api_key", ""))
+            if api_key_reference and not api_key_reference.startswith(("@", "$")):
+                api_key_reference = ""
+            cfg = BasiliskConfig(
+                target=TargetConfig(
+                    api_key=api_key_reference,
+                    provider=t["provider"],
+                    model=t.get("model", ""),
+                    url=t.get("api_base", t.get("url", "")),
+                ),
+                policy=scan_policy,
+            )
+            adapter = create_provider(
+                cfg,
+                namespace=f"differential:{len(adapters)}",
+                ledger=ledger,
+                credential_override=t.get("_credential"),
             )
             adapters.append((t["provider"], t.get("model", ""), adapter))
 
@@ -267,6 +306,7 @@ async def run_differential(
             await asyncio.sleep(0.2)  # Rate limit respect
 
         report.finished_at = datetime.now(timezone.utc)
+        report.request_stats = ledger.stats.to_dict()
         return report
     finally:
         for _, _, adapter in adapters:

@@ -29,8 +29,7 @@ except ImportError:  # pragma: no cover - optional runtime state
     ed25519 = None
 
 logger = logging.getLogger("basilisk.native")
-_SKIP_INTEGRITY_CHECK = os.environ.get("BASILISK_SKIP_NATIVE_INTEGRITY_CHECK", "").lower() == "true"
-_TRUSTED_NATIVE_SIGNING_PUBLIC_KEY_HEX = "e3c2fb80b9dfbb6604c3829a1075a05b4821e285e23da20f0a53407d3037187f"
+_TRUSTED_NATIVE_SIGNING_PUBLIC_KEY_HEX = "e3c9e3fdd324da269e27f769ee7a67b8fdadfb19b8b1b52dc736887764532fe9"
 _MAX_NATIVE_TEXT_BYTES = max(4096, int(os.environ.get("BASILISK_NATIVE_TEXT_MAX_BYTES", "262144")))
 _MAX_NATIVE_PAIR_BYTES = max(
     _MAX_NATIVE_TEXT_BYTES,
@@ -224,9 +223,6 @@ def _load_native_manifest(directory: Path) -> dict[str, str]:
 
 
 def _verify_library_integrity(path: Path, public_key_hex: str | None = None) -> bool:
-    if _SKIP_INTEGRITY_CHECK:
-        logger.warning("Native integrity verification skipped via BASILISK_SKIP_NATIVE_INTEGRITY_CHECK=true")
-        return True
     if not _verify_manifest_signature(path.parent, public_key_hex=public_key_hex):
         return False
     manifest = _load_native_manifest(path.parent)

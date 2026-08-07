@@ -71,9 +71,9 @@
 
 **Basilisk** is an open-source offensive security framework purpose-built for **AI red teaming** and **LLM penetration testing**. It maps its attack surface to the **OWASP LLM Top 10** threat model and combines that coverage with a genetic algorithm engine called **Smart Prompt Evolution (SPE-NL)** that evolves adversarial prompt payloads across generations.
 
-Whether you are testing **OpenAI GPT-4o**, **Anthropic Claude**, **Google Gemini**, **xAI Grok**, **Meta Llama**, or a custom LLM endpoint, Basilisk provides 33 attack modules, 5 recon modules, differential multi-model scanning, guardrail posture grading, and signed audit logging out of the box.
+Whether you are testing **OpenAI GPT-4o**, **Anthropic Claude**, **Google Gemini**, **NVIDIA API Catalog**, **xAI Grok**, **Meta Llama**, or a custom LLM endpoint, Basilisk provides 33 attack modules, 5 recon modules, differential multi-model scanning, guardrail posture grading, and signed audit logging out of the box.
 
-v2.0.0 introduces cryptographically signed native libraries, Ed25519 audit log integrity, a dedicated SQLite worker architecture, evidence-backed findings with trust tiers, and hardened secret handling across the CLI and desktop app. The code is the proof -- read the hardening section below or audit the source directly.
+v2.0.0 introduces support for cryptographically signed native libraries, hash-chained audit logs, a dedicated SQLite worker architecture, evidence-backed findings with trust tiers, and hardened secret handling across the CLI and desktop app.
 
 ### Why Basilisk?
 
@@ -81,7 +81,7 @@ v2.0.0 introduces cryptographically signed native libraries, Ed25519 audit log i
 - **Genetic Prompt Evolution**: The SPE-NL engine mutates, crosses over, and scores prompts across generations. When a static payload gets refused, evolution searches for nearby variants that preserve intent while changing delivery.
 - **OWASP-Aligned Attack Coverage**: 33 modules covering prompt injection, system prompt extraction, data exfiltration, tool abuse, guardrail bypass, denial of service, multi-turn manipulation, RAG attacks, and multimodal injection.
 - **Evidence-Backed Findings**: Every finding carries structured evidence signals, replay steps, and calibrated verdicts. Production-tier findings get downgraded if the proof is weak. No more "the model said something bad" as your entire evidence chain.
-- **Broad Provider Support**: OpenAI, Anthropic, Google, xAI (Grok), Groq, Azure, AWS Bedrock, GitHub Models, Ollama, vLLM, and custom HTTP/WebSocket endpoints.
+- **Broad Provider Support**: OpenAI, Anthropic, Google, NVIDIA API Catalog, xAI (Grok), Groq, Azure, AWS Bedrock, GitHub Models, Ollama, vLLM, and custom HTTP/WebSocket endpoints.
 - **CI/CD Ready**: Native GitHub Action with SARIF output and baseline regression detection for automated AI security testing in your pipeline.
 - **Desktop App**: Electron GUI for visual red teaming with live scan dashboards, campaign controls, and report export.
 
@@ -275,15 +275,19 @@ When you already know the exact prompts and assertions you need, skip the explor
 
 ### Probe Corpus
 
-223 probes in YAML across 9 categories. Each probe carries structured metadata: objective, expected signals, failure modes, target archetypes, tool requirements, follow-up probe IDs, and OWASP mapping. The corpus seeds evolution runs and feeds the effectiveness tracker.
+263 probes in YAML across 9 categories. Single prompts, ordered multi-turn sequences, and fabricated role/content histories use the same versioned loader. Every probe carries an OWASP mapping; most include expected signals, and many include tags. The loader also supports richer optional metadata such as objectives, preconditions, failure modes, target archetypes, tool requirements, and follow-up probe IDs as the corpus evolves. The corpus seeds evolution runs and feeds the effectiveness tracker.
 
 ### Audit Logging
 
 On by default. Ed25519-signed JSONL with SHA-256 chain integrity:
-- Every prompt sent, response received, finding discovered, and error is logged
+- Scan configuration, campaign policy, findings, errors, evolution, recon, and report events are logged
+- Prompt and response event methods are available for integrations that explicitly enable those hooks
 - API keys automatically redacted before writing
+- Desktop master keys protected with Electron `safeStorage` when a secure operating-system backend is available
+- CLI scans executed in restricted child workers with mode-specific OS resource ceilings
 - Audit key resolution: key file, encrypted secret store, or legacy environment variable
-- Tamper detection through chained checksums and digital signatures
+- Export the signing trust anchor once with `basilisk audit-trust-export audit-public.key`, store it independently, then verify files with `basilisk audit-verify PATH --public-key-file audit-public.key`
+- `basilisk audit-verify PATH --allow-embedded-key` checks integrity only and does not establish external authenticity
 
 ### 5 Report Formats
 
@@ -293,7 +297,7 @@ On by default. Ed25519-signed JSONL with SHA-256 chain integrity:
 | **SARIF 2.1.0** | CI/CD integration -- GitHub Code Scanning, DefectDojo, Azure DevOps |
 | **JSON** | Machine-readable with full metadata |
 | **Markdown** | Documentation-ready, commit-friendly |
-| **PDF** | Offline sharing and stakeholder delivery (weasyprint / reportlab fallback) |
+| **PDF** | Offline sharing using weasyprint, reportlab, or the built-in basic PDF renderer |
 
 ### Campaign and Policy Controls
 
@@ -307,7 +311,7 @@ Scans carry operator context and execution policy:
 ### Universal Provider Support
 
 Via `litellm` + custom adapters:
-- **Cloud** -- OpenAI, Anthropic, Google, xAI (Grok), Groq, Azure, AWS Bedrock
+- **Cloud** -- OpenAI, Anthropic, Google, NVIDIA API Catalog, xAI (Grok), Groq, Azure, AWS Bedrock
 - **GitHub Models** -- free access to GPT-4o, o1, and more via `github.com/marketplace/models`
 - **Local** -- Ollama, vLLM, llama.cpp
 - **Custom** -- any HTTP REST API or WebSocket endpoint
@@ -333,7 +337,7 @@ Full desktop GUI with:
 Performance-critical paths compiled to shared libraries with full Python fallbacks:
 - **C** -- BPE token estimation, Shannon entropy, Levenshtein distance, confusable detection, payload encoding (base64, hex, ROT13, URL, Unicode escape)
 - **Go** -- concurrent mutation operators (including 4 multi-turn aware), crossover modes, batch mutation, population diversity scoring, Aho-Corasick multi-pattern matching, refusal/compliance/sensitive data detection
-- All native libraries are verified against an **Ed25519-signed manifest** before loading. Hash mismatches block the load.
+- Native libraries load only after an **Ed25519-signed manifest** and SHA-256 hashes verify. Unsigned or mismatched libraries are rejected and Basilisk uses its Python fallback.
 
 ---
 
@@ -345,7 +349,7 @@ v2.0.0 focuses on runtime hardening, evidence handling, desktop isolation, and o
 
 - **Ed25519 Signed Native Libraries** -- Native libraries are loaded only after verifying their SHA-256 hashes against an Ed25519-signed manifest.
 - **Ed25519 Audit Log Signatures** -- Every audit log entry is digitally signed. Legacy HMAC-SHA256 is deprecated. Audit key resolution prefers encrypted local storage over environment variables.
-- **CLI Secret Rejection** -- `--api-key sk-...` is rejected at parse time. Secrets must come from environment variables or `@file` references. This keeps credentials out of shell history and `/proc` listings.
+- **CLI Secret Rejection** -- inline `--api-key`, `--attacker-api-key`, and `--auth` values are rejected. Credentials must come from environment variables, encrypted desktop settings, or `@file` references, keeping them out of shell history and process listings.
 - **SQLite Worker Architecture** -- Replaced ad-hoc locking with a dedicated worker thread per database path. WAL mode, async queue, and single-writer semantics reduce event-loop contention.
 - **Native Bridge Input Guardrails** -- FFI calls enforce input size limits. Oversized Levenshtein or similarity calls are rejected before reaching native code.
 - **Path Traversal Protection** -- Config file loading uses `Path.resolve()` and ancestry checks against a safe root allowlist. String-prefix matching is gone.
@@ -376,7 +380,7 @@ Deterministic assertion-driven test harness. YAML config with typed assertions (
 
 ### Previous Releases
 
-See [CHANGELOG.md](CHANGELOG.md) for v1.1.0, v1.0.6, v1.0.5, and earlier release notes.
+See the [GitHub releases](https://github.com/regaan/basilisk/releases) for previous release notes and artifacts.
 
 ---
 
@@ -519,6 +523,7 @@ jobs:
 | `OPENAI_API_KEY` | OpenAI | If scanning with OpenAI |
 | `ANTHROPIC_API_KEY` | Anthropic | If scanning with Anthropic |
 | `GOOGLE_API_KEY` | Google | If scanning with Google |
+| `NVIDIA_API_KEY` | NVIDIA API Catalog | If scanning an NVIDIA hosted model |
 | `XAI_API_KEY` | xAI | If scanning with Grok |
 | `GH_MODELS_TOKEN` | GitHub Models | Free access to GPT-4o, o1, etc. |
 
@@ -589,7 +594,7 @@ basilisk/
     multiturn/         # LLM01 -- 6 modules
     rag/               # LLM03/06 -- 3 modules
     multimodal.py      # LLM01 -- 1 module
-  payloads/      # 223 YAML probes + effectiveness tracker
+  payloads/      # 263 YAML probes + effectiveness tracker
   eval/          # Assertion-driven eval runner + config + reporting
   cli/           # Click + Rich terminal interface
   report/        # HTML, JSON, SARIF, Markdown, PDF generators
@@ -622,6 +627,7 @@ action.yml       # GitHub Action for CI/CD
 | [Eval, Probes, and Curiosity](docs/eval-probes-curiosity.md) | Probe corpus, eval runner, curiosity steering, effectiveness tracking |
 | [Reporting](docs/reporting.md) | Report formats and CI/CD integration |
 | [API Reference](docs/api-reference.md) | Desktop backend API endpoints |
+| [Security and Release Verification](docs/roadmap-verification.md) | Roadmap controls, test evidence, benchmarks, and release gates |
 | [Contributing](CONTRIBUTING.md) | Development setup, PR process, coding standards |
 | [Security Policy](SECURITY.md) | Vulnerability disclosure with SLAs |
 

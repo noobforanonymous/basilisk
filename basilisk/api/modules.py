@@ -7,6 +7,7 @@ import os
 from fastapi import APIRouter, Depends
 
 from basilisk.api.shared import get_api_key, verify_token
+from basilisk.core.redaction import sanitize_error_text
 
 router = APIRouter()
 
@@ -31,13 +32,20 @@ async def list_modules():
                     "is_multiturn": descriptor.is_multiturn,
                     "has_baseline_probe": descriptor.supports_baseline_differential,
                     "requires_tool_proof": descriptor.requires_tool_proof,
+                    "applicable_probe_ids": descriptor.applicable_probe_ids,
+                    "preconditions": descriptor.preconditions,
+                    "required_target_capabilities": descriptor.required_target_capabilities,
+                    "verification_steps": descriptor.verification_steps,
+                    "expected_false_positives": descriptor.expected_false_positives,
+                    "request_cost": descriptor.request_cost,
+                    "safety_classification": descriptor.safety_classification,
                     "default_enabled": descriptor.trust_tier != "research",
                 }
                 for descriptor in (describe_attack_module(module) for module in modules)
             ],
         }
     except Exception as exc:
-        return {"error": str(exc), "modules": [], "total": 0}
+        return {"error": sanitize_error_text(exc), "modules": [], "total": 0}
 
 
 @router.get("/api/modules/multiturn", dependencies=[Depends(verify_token)])
@@ -120,7 +128,7 @@ async def evolution_operators():
             ],
         }
     except Exception as exc:
-        return {"error": str(exc)}
+        return {"error": sanitize_error_text(exc)}
 
 
 @router.get("/api/providers", dependencies=[Depends(verify_token)])
@@ -191,7 +199,7 @@ async def list_multimodal_techniques():
             "pillow_available": _check_pillow(),
         }
     except Exception as exc:
-        return {"error": str(exc), "techniques": [], "total": 0}
+        return {"error": sanitize_error_text(exc), "techniques": [], "total": 0}
 
 
 def _check_pillow() -> bool:

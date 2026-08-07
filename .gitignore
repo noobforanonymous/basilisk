@@ -115,9 +115,10 @@ dist/basilisk-backend.exe
 # Electron / Desktop App
 # =========================
 desktop/dist/
+desktop/dist-baseline/
+desktop/dist-config-check/
 desktop/bin/
 desktop/node_modules/
-desktop/package-lock.json
 desktop/LICENSE.txt
 !desktop/build/
 desktop/build/*
@@ -135,14 +136,15 @@ native/go/matcher/matcher
 basilisk/native_libs/*.so
 basilisk/native_libs/*.dylib
 basilisk/native_libs/*.dll
-!basilisk/native_libs/manifest.json
-!basilisk/native_libs/manifest.sig
+basilisk/native_libs/manifest.json
+basilisk/native_libs/manifest.sig
 
 # =========================
 # Scan output / Reports
 # =========================
 basilisk-reports/
 basilisk-sessions.db
+benchmarks/results/
 
 # =========================
 # Documentation builds

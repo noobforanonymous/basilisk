@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Callable
 from datetime import datetime, timezone
 
+from basilisk.core.redaction import sanitize_error_text
 from basilisk.eval.config import EvalConfig, EvalTest, Assertion
 from basilisk.eval.assertions import evaluate_assertion, AssertionResult
 
@@ -133,6 +134,7 @@ class EvalRunner:
         parallel: bool | int = False,
         on_test_complete: Callable | None = None,
         rate_limit: float = 0,
+        credential_override: str | None = None,
     ) -> None:
         self.config = config
         self.provider = provider
@@ -140,6 +142,7 @@ class EvalRunner:
         self.parallel = parallel
         self.on_test_complete = on_test_complete
         self.rate_limit = rate_limit  # requests per minute, 0 = unlimited
+        self.credential_override = credential_override
         self._request_interval = (60.0 / rate_limit) if rate_limit > 0 else 0.0
 
     async def run(self) -> EvalResult:
@@ -185,13 +188,13 @@ class EvalRunner:
                         try:
                             self.on_test_complete(test_result)
                         except Exception:
-                            pass
+                            logger.exception("Eval completion callback failed for %s", test_result.test_id)
         finally:
             if self.provider is None and provider is not None:
                 try:
                     await provider.close()
                 except Exception:
-                    pass
+                    logger.exception("Eval provider cleanup failed")
 
         result.completed_at = datetime.now(timezone.utc).isoformat()
         result.total_duration_ms = (time.monotonic() - start) * 1000
@@ -277,21 +280,46 @@ class EvalRunner:
                 prompt=test.prompt,
                 response="",
                 passed=False,
-                error=str(e),
+                error=sanitize_error_text(e),
                 duration_ms=(time.monotonic() - start) * 1000,
             )
 
     async def _create_provider(self) -> Any:
         """Create a provider from eval config."""
-        from basilisk.providers.litellm_adapter import LiteLLMAdapter
+        from basilisk.core.config import BasiliskConfig, TargetConfig
+        from basilisk.policy.models import ScanPolicy
+        from basilisk.runtime.orchestrator import create_provider
 
         target = self.config.target
-        provider = LiteLLMAdapter(
-            default_model=target.model,
-            api_key=target.resolve_api_key(),
-            api_base=target.api_base or None,
+        credential = (
+            self.credential_override
+            if self.credential_override is not None
+            else target.resolve_api_key()
         )
-        return provider
+        cfg = BasiliskConfig(
+            target=TargetConfig(
+                provider=target.provider,
+                model=target.model,
+                api_key="",
+                url=target.api_base,
+                timeout=self.config.defaults.timeout,
+                max_retries=self.config.defaults.max_retries,
+            ),
+            policy=ScanPolicy(
+                request_budget=max(
+                    1,
+                    len(self.config.tests) * (self.config.defaults.max_retries + 1),
+                ),
+                request_timeout=self.config.defaults.timeout,
+                retry_attempts=self.config.defaults.max_retries,
+                max_concurrency=5 if self.parallel else 1,
+            ),
+        )
+        return create_provider(
+            cfg,
+            namespace="eval",
+            credential_override=credential,
+        )
 
 
 def diff_eval_results(

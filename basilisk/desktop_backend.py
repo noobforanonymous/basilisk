@@ -18,6 +18,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from basilisk.api import eval as eval_api
+from basilisk.api import auth as auth_api
+from basilisk.api import benchmark as benchmark_api
 from basilisk.api import modules as modules_api
 from basilisk.api import reports as reports_api
 from basilisk.api import scan as scan_api
@@ -78,6 +80,9 @@ def create_app(*, enable_docs: bool | None = None) -> FastAPI:
     )
 
     app.include_router(scan_api.router)
+    app.include_router(auth_api.router)
+    if os.environ.get("BASILISK_E2E") == "1":
+        app.include_router(benchmark_api.router)
     app.include_router(sessions_api.router)
     app.include_router(modules_api.router)
     app.include_router(reports_api.router)
@@ -95,6 +100,12 @@ def main():
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--debug", action="store_true")
     args = parser.parse_args()
+
+    if os.environ.get("BASILISK_RESTRICTED_WORKER") == "1":
+        from basilisk.runtime.isolation import WorkerLimits, apply_worker_limits
+
+        backend = apply_worker_limits(WorkerLimits(), include_cpu=False)
+        logger.info("Desktop backend process isolation: %s", backend)
 
     log_level = "debug" if args.debug else "info"
     uvicorn.run(

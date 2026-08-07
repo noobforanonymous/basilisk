@@ -7,8 +7,9 @@ the most effective elements of each.
 
 from __future__ import annotations
 
-import random
 from dataclasses import dataclass
+
+from basilisk.evolution.randomness import random
 
 
 @dataclass

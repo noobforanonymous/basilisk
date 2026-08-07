@@ -4,9 +4,9 @@
 
 | Version | Supported |
 |---|---|
-| 1.0.x (latest) | ✅ Active support |
-| 0.1.x | ⚠️ Security patches only |
-| < 0.1.0 | ❌ No support |
+| 2.0.x (latest) | ✅ Active support |
+| 1.0.x | ⚠️ Security patches only |
+| < 1.0.0 | ❌ No support |
 
 ## Reporting a Vulnerability
 
@@ -73,6 +73,37 @@ Security patches are released as point releases (e.g., 1.0.2, 1.0.3). We recomme
 ```bash
 pip install --upgrade basilisk-ai
 ```
+
+## Release Integrity
+
+Tagged desktop releases require platform signing credentials and a separate
+Ed25519 key for native-library manifests. The build stops if required trust
+material is missing. Native libraries are checked against their signed
+manifest before packaging and again before runtime loading.
+
+The desktop process uses Electron `safeStorage` to wrap the Fernet master key
+before starting the local backend. Linux `basic_text` storage is not accepted
+as an OS-protected backend. CLI-only installations use the operating-system
+keyring when available and otherwise fall back to a private local key file.
+Secret values and unwrapped keys are never written to application logs.
+
+CLI scans execute in a dedicated child interpreter by default. The supervisor
+applies mode-specific wall-clock ceilings, and the child applies POSIX rlimits
+or a Windows Job Object for CPU, memory, output-file, descriptor, and child-
+process limits where the operating system supports them. The Electron backend
+is already a separate sidecar process and receives the same memory/process
+boundary. `BASILISK_DISABLE_PROCESS_ISOLATION=1` exists for controlled
+diagnostics and unit tests; do not use it for untrusted targets.
+
+Release assets include SHA-256 digests, a CycloneDX SBOM, SLSA provenance, and
+Sigstore signatures. GitHub also publishes build-provenance and SBOM
+attestations for every installer and archive. Verify the published digest and
+attestation before running an installer obtained from a mirror.
+
+`BASILISK_NATIVE_SIGNING_KEY` is a repository secret containing a
+base64-encoded raw 32-byte Ed25519 private key. Its public key is derived during
+the build and embedded into that release's desktop sidecar. The private key is
+not written to the repository or packaged artifact.
 
 ## Hall of Fame
 

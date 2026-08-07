@@ -16,16 +16,33 @@ jobs:
     permissions:
       contents: read
       packages: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Run release tests
+        run: |
+          python scripts/verify_dependency_locks.py
+          python -m pip install --require-hashes -r requirements-dev.lock
+          python -m pip install --no-build-isolation --no-deps .
+          python -m pytest -q
+          python -m ruff check . --select E9,F63,F7,F82
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
 
       - name: Verify Secrets Presence
         if: github.event_name != 'pull_request'
@@ -35,14 +52,14 @@ jobs:
 
       - name: Log in to Docker Hub
         if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
+        uses: docker/login-action@c299e40c65443455700f0fdfc63efafe5b349051 # v3
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
       - name: Log in to GHCR
         if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
+        uses: docker/login-action@c299e40c65443455700f0fdfc63efafe5b349051 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -50,7 +67,7 @@ jobs:
 
       - name: Extract metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5
         with:
           images: |
             ${{ env.DOCKERHUB_REPO }}
@@ -64,7 +81,8 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push Docker image
-        uses: docker/build-push-action@v5
+        id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           push: ${{ github.event_name != 'pull_request' }}
@@ -74,8 +92,40 @@ jobs:
           cache-to: type=gha,mode=max
           platforms: linux/amd64,linux/arm64
 
+      - name: Install Cosign
+        if: github.event_name != 'pull_request'
+        uses: sigstore/cosign-installer@1aa8e0f2454b781fbf0fbf306a4c9533a0c57409 # v3.7.0
+
+      - name: Sign and verify published image digests
+        if: github.event_name != 'pull_request'
+        env:
+          COSIGN_YES: "true"
+          GHCR_IMAGE: ${{ env.GHCR_REPO }}@${{ steps.build.outputs.digest }}
+          DOCKERHUB_IMAGE: ${{ env.DOCKERHUB_REPO }}@${{ steps.build.outputs.digest }}
+        run: |
+          expected_identity="${GITHUB_SERVER_URL}/${GITHUB_WORKFLOW_REF}"
+          for image in "$GHCR_IMAGE" "$DOCKERHUB_IMAGE"; do
+            cosign sign --yes "$image"
+            cosign verify \
+              --certificate-identity "$expected_identity" \
+              --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+              "$image"
+          done
+
+      - name: Attest GHCR image provenance
+        if: github.event_name != 'pull_request'
+        uses: actions/attest@36051bcae73b7c2a8a6945a48cbf80953c6baa35 # v4
+        with:
+          subject-name: ${{ env.GHCR_REPO }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
       - name: Test Docker image
         if: github.event_name != 'pull_request'
+        env:
+          BASILISK_IMAGE_TAGS: ${{ steps.meta.outputs.tags }}
         run: |
-          docker pull ${{ env.GHCR_REPO }}:latest
-          docker run --rm ${{ env.GHCR_REPO }}:latest --help
+          image=$(printf '%s\n' "$BASILISK_IMAGE_TAGS" | head -n 1)
+          test -n "$image"
+          docker pull "$image"
+          docker run --rm "$image" --help

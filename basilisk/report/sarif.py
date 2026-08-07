@@ -136,7 +136,7 @@ def generate_sarif(
         }],
     }
 
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
         json.dump(sarif_doc, f, indent=2, default=str)
 
 

@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from basilisk.api.shared import AuditLogResponse, ReportRequest, ReportResponse, active_scans, scan_results, verify_token
 from basilisk.core.config import OutputConfig
+from basilisk.core.redaction import sanitize_error_text
 from basilisk.core.session import ScanSession
 
 router = APIRouter()
@@ -28,7 +29,7 @@ async def generate_report(session_id: str, req: ReportRequest):
             try:
                 session = await ScanSession.resume(session_id, db_path)
             except ValueError as exc:
-                raise HTTPException(404, {"error": str(exc)}) from exc
+                raise HTTPException(404, {"error": sanitize_error_text(exc)}) from exc
         if session is None:
             raise HTTPException(404, {"error": "Session data not found. The scan may have been cleared."})
 
@@ -43,7 +44,7 @@ async def generate_report(session_id: str, req: ReportRequest):
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(500, {"error": str(exc)})
+        raise HTTPException(500, {"error": sanitize_error_text(exc)})
 
 
 @router.post("/api/report/{session_id}/export", dependencies=[Depends(verify_token)])
@@ -55,14 +56,18 @@ async def export_report(session_id: str, req: ReportRequest):
 
 @router.get("/api/audit/{session_id}", response_model=AuditLogResponse, dependencies=[Depends(verify_token)])
 async def get_audit_log(session_id: str):
-    logs = glob.glob(f"./basilisk-reports/audit_{session_id}_*.jsonl")
+    logs = glob.glob(f"./basilisk-reports/audit_{glob.escape(session_id)}_*.jsonl")
     if not logs:
         raise HTTPException(404, {"error": "No audit log found for this session"})
+    log_path = max(logs, key=os.path.getmtime)
     entries = []
-    with open(logs[0]) as handle:
+    with open(log_path, encoding="utf-8") as handle:
         for line in handle:
             try:
                 entries.append(json.loads(line))
             except json.JSONDecodeError:
                 continue
-    return {"path": logs[0], "entries": entries}
+    from basilisk.core.audit import verify_audit_log
+
+    verification = verify_audit_log(log_path).to_dict()
+    return {"path": log_path, "entries": entries, "verification": verification}

@@ -10,7 +10,7 @@ import secrets
 from typing import Any
 
 from fastapi import Header, HTTPException, WebSocket
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 from basilisk.core.secrets import SecretStore
 
@@ -41,21 +41,25 @@ _eval_results: dict[str, dict[str, Any]] = {}
 _secret_store = SecretStore()
 
 
-class ScanConfig(BaseModel):
+class StrictRequestModel(BaseModel):
+    """Reject unknown JSON fields instead of silently accepting unsafe input."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ScanConfig(StrictRequestModel):
     target: str
     provider: str = "openai"
     model: str = ""
-    api_key: str = ""
-    auth: str = ""
     mode: str = "standard"
     evolve: bool = True
     generations: int = 5
     modules: list[str] = []
+    probe_ids: list[str] = []
     skip_recon: bool = False
     recon_modules: list[str] = []
     attacker_provider: str = ""
     attacker_model: str = ""
-    attacker_api_key: str = ""
     population_size: int = 10
     fitness_threshold: float = 0.9
     stagnation_limit: int = 3
@@ -65,6 +69,9 @@ class ScanConfig(BaseModel):
     diversity_mode: str = "novelty"
     intent_weight: float = 0.15
     include_research_modules: bool = False
+    max_findings: int = 0
+    input_price_per_million: float | None = Field(default=None, ge=0)
+    output_price_per_million: float | None = Field(default=None, ge=0)
     campaign: dict[str, Any] = {}
     policy: dict[str, Any] = {}
 
@@ -75,9 +82,9 @@ class ReportRequest(BaseModel):
     open_browser: bool = False
 
 
-class ApiKeyRequest(BaseModel):
+class ApiKeyRequest(StrictRequestModel):
     provider: str
-    key: str
+    key: SecretStr
 
 
 class SecretStatus(BaseModel):
@@ -159,18 +166,25 @@ class ReportResponse(BaseModel):
 class AuditLogResponse(BaseModel):
     path: str
     entries: list[dict[str, Any]] = Field(default_factory=list)
+    verification: dict[str, Any] = Field(default_factory=dict)
 
 
-class DiffConfig(BaseModel):
-    targets: list[dict[str, str]]
+class DiffTarget(StrictRequestModel):
+    provider: str
+    model: str = ""
+    url: str = ""
+    api_base: str = ""
+
+
+class DiffConfig(StrictRequestModel):
+    targets: list[DiffTarget]
     categories: list[str] = []
 
 
-class PostureConfig(BaseModel):
+class PostureConfig(StrictRequestModel):
     target: str = ""
     provider: str = "openai"
     model: str = ""
-    api_key: str = ""
 
 
 class EvalRunConfig(BaseModel):
@@ -196,6 +210,7 @@ _PROVIDER_ENV_MAP = {
     "groq": "GROQ_API_KEY",
     "github": "GH_MODELS_TOKEN",
     "bedrock": "AWS_ACCESS_KEY_ID",
+    "nvidia": "NVIDIA_API_KEY",
     "custom": "BASILISK_API_KEY",
 }
 

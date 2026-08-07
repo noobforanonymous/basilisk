@@ -16,6 +16,7 @@ from functools import lru_cache
 from typing import Any
 
 from basilisk.core.evidence import EvidenceBundle
+from basilisk.core.redaction import redacted_descriptor, sanitize_value
 
 
 class Severity(str, Enum):
@@ -55,6 +56,14 @@ class Severity(str, Enum):
             Severity.LOW: 1,
             Severity.INFO: 0,
         }[self]
+
+
+class FindingValidationLevel(str, Enum):
+    """Maturity of a result from initial signal through reproduced proof."""
+
+    OBSERVATION = "observation"
+    CANDIDATE = "candidate"
+    VERIFIED = "verified"
 
 
 class AttackCategory(str, Enum):
@@ -104,14 +113,11 @@ class Message:
         }
 
     def sanitized_dict(self, max_chars: int = 160) -> dict[str, Any]:
-        content = self.content[:max_chars]
-        if len(self.content) > max_chars:
-            content += "..."
         return {
             "role": self.role,
-            "content": content,
+            "content": redacted_descriptor(self.content),
             "timestamp": self.timestamp.isoformat(),
-            "metadata": self.metadata,
+            "metadata": sanitize_value(self.metadata, redact_all_strings=True),
         }
 
     @classmethod
@@ -150,6 +156,13 @@ class Finding:
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     metadata: dict[str, Any] = field(default_factory=dict)
     evidence: EvidenceBundle | None = None
+    validation_level: FindingValidationLevel = FindingValidationLevel.OBSERVATION
+    attempt_count: int = 1
+    success_count: int = 0
+    negative_control_passed: bool = False
+    baseline_clean: bool = False
+    response_fingerprint: str = ""
+    false_positive_explanation: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         module_meta = _module_metadata(self.attack_module, self.metadata)
@@ -176,6 +189,13 @@ class Finding:
             "module_success_criteria": module_meta["success_criteria"],
             "module_evidence_requirements": module_meta["evidence_requirements"],
             "policy_downgraded": bool(self.metadata.get("policy_downgraded", False)),
+            "validation_level": self.validation_level.value,
+            "attempt_count": self.attempt_count,
+            "success_count": self.success_count,
+            "negative_control_passed": self.negative_control_passed,
+            "baseline_clean": self.baseline_clean,
+            "response_fingerprint": self.response_fingerprint,
+            "false_positive_explanation": self.false_positive_explanation,
         }
 
     def sanitized_dict(
@@ -209,7 +229,7 @@ class Finding:
         )
         if not include_conversation and self.conversation:
             data["metadata"] = {
-                **self.metadata,
+                **data["metadata"],
                 "conversation_redacted": True,
                 "conversation_message_count": len(self.conversation),
             }
@@ -235,6 +255,15 @@ class Finding:
             timestamp=datetime.fromisoformat(data.get("timestamp", datetime.now(timezone.utc).isoformat())),
             metadata=data.get("metadata", {}),
             evidence=EvidenceBundle.from_dict(data["evidence"]) if data.get("evidence") else None,
+            validation_level=FindingValidationLevel(
+                data.get("validation_level", FindingValidationLevel.OBSERVATION.value)
+            ),
+            attempt_count=int(data.get("attempt_count", 1)),
+            success_count=int(data.get("success_count", 0)),
+            negative_control_passed=bool(data.get("negative_control_passed", False)),
+            baseline_clean=bool(data.get("baseline_clean", False)),
+            response_fingerprint=data.get("response_fingerprint", ""),
+            false_positive_explanation=data.get("false_positive_explanation", ""),
         )
 
     @property
@@ -250,26 +279,11 @@ def _sanitize_artifact(value: str, include_raw: bool, preview_chars: int) -> str
         return ""
     if include_raw:
         return value
-    preview = value[:preview_chars]
-    if len(value) > preview_chars:
-        preview += "..."
-    return f"[redacted] {preview}"
+    return redacted_descriptor(value)
 
 
 def _sanitize_nested_value(value: Any, *, include_raw: bool, preview_chars: int) -> Any:
-    if isinstance(value, str):
-        return _sanitize_artifact(value, include_raw, preview_chars)
-    if isinstance(value, dict):
-        return {
-            key: _sanitize_nested_value(val, include_raw=include_raw, preview_chars=preview_chars)
-            for key, val in value.items()
-        }
-    if isinstance(value, list):
-        return [
-            _sanitize_nested_value(item, include_raw=include_raw, preview_chars=preview_chars)
-            for item in value
-        ]
-    return value
+    return sanitize_value(value, include_raw=include_raw, redact_all_strings=True)
 
 
 @lru_cache(maxsize=256)

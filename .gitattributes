@@ -1,0 +1,11 @@
+* text=auto
+
+# Scripts executed by Unix shells must remain LF even in Windows clones.
+*.sh text eol=lf
+Makefile text eol=lf
+Dockerfile text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+
+# Native Windows automation remains readable by PowerShell on every host.
+*.ps1 text eol=lf

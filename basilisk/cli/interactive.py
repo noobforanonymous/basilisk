@@ -12,17 +12,13 @@ Provides a live terminal interface where the user can:
 
 from __future__ import annotations
 
-import asyncio
 import shlex
-from datetime import datetime, timezone
 
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
-from rich.text import Text
 from rich.prompt import Prompt
 
-from basilisk import BANNER
 from basilisk.core.config import BasiliskConfig
 from basilisk.core.finding import Finding, Severity, AttackCategory
 from basilisk.core.session import ScanSession
@@ -51,9 +47,10 @@ async def run_interactive(
     async with _create_provider(cfg) as prov:
         # Health check
         console.print("[dim]Connecting to target...[/dim]")
-        healthy = await prov.health_check()
+        healthy, health_error = await prov.health_check()
         if not healthy:
-            console.print("[red]✗ Connection failed. Check your API key and endpoint.[/red]")
+            detail = f" ({health_error})" if health_error else ""
+            console.print(f"[red]✗ Connection failed{detail}[/red]")
             return
         console.print("[green]✓[/green] Connected\n")
 
@@ -170,7 +167,7 @@ async def _handle_command(
             return
         console.print("[bold yellow]Running Evolution Engine...[/bold yellow]")
         from basilisk.cli.scan import _run_evolution
-        await _run_evolution(prov, session, cfg)
+        await _run_evolution(prov, session, cfg, payload or "")
 
     elif command == "/findings":
         if not session.findings:

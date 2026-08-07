@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling==1.31.0"]
 build-backend = "hatchling.build"
 
 [project]
@@ -30,12 +30,12 @@ classifiers = [
     "Topic :: Software Development :: Testing",
 ]
 dependencies = [
-    "click>=8.1.0",
+    "click>=8.3.3",
     "rich>=13.0.0",
     "httpx>=0.27.0",
-    "litellm>=1.40.0",
+    "litellm>=1.84.0",
     "pyyaml>=6.0",
-    "fastapi>=0.111.0",
+    "fastapi>=0.141.1",
     "uvicorn[standard]>=0.30.0",
     "websockets>=12.0",
     "jinja2>=3.1.0",
@@ -43,7 +43,15 @@ dependencies = [
     "numpy>=1.26.0",
     "scikit-learn>=1.5.0",
     "tiktoken>=0.7.0",
-    "cryptography>=43.0.0",
+    "cryptography>=48.0.1",
+    # Security floors for transitive HTTP/rendering dependencies. Keeping
+    # these explicit prevents older vulnerable versions in unlocked installs.
+    "aiohttp>=3.14.3",
+    "idna>=3.15",
+    "pygments>=2.20.0",
+    "requests>=2.33.0",
+    "starlette>=1.3.1",
+    "urllib3>=2.7.0",
 ]
 
 [project.optional-dependencies]
@@ -80,7 +88,17 @@ basilisk = "basilisk.cli.main:cli"
 packages = ["basilisk"]
 
 [tool.hatch.build.targets.sdist]
-include = ["basilisk/", "README.md", "LICENSE", "pyproject.toml", "requirements.txt", "requirements.lock"]
+include = [
+    "basilisk/",
+    "README.md",
+    "LICENSE",
+    "pyproject.toml",
+    "requirements.txt",
+    "requirements.in",
+    "requirements.lock",
+    "requirements-dev.in",
+    "requirements-dev.lock",
+]
 
 [tool.ruff]
 target-version = "py311"

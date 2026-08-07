@@ -53,9 +53,17 @@ a = Analysis(
         'basilisk.core.models',
         'basilisk.runtime',
         'basilisk.runtime.orchestrator',
+        'basilisk.runtime.destination_policy',
+        'basilisk.runtime.request_engine',
+        'basilisk.runtime.isolation',
+        'basilisk.runtime.scan_worker',
 
         # ── v2.0 Platform Modules ──
         'basilisk.core.audit',
+        'basilisk.core.redaction',
+        'basilisk.core.reproducibility',
+        'basilisk.core.verification',
+        'basilisk.auth_testing',
         'basilisk.differential',
         'basilisk.posture',
         'basilisk.core.secrets',
@@ -160,7 +168,9 @@ a = Analysis(
         'basilisk.providers.base',
         'basilisk.providers.litellm_adapter',
         'basilisk.providers.custom_http',
+        'basilisk.providers.limits',
         'basilisk.providers.websocket',
+        'basilisk.providers.nvidia',
 
         # ── Recon ──
         'basilisk.recon',
@@ -180,6 +190,7 @@ a = Analysis(
         # ── CLI ──
         'basilisk.cli',
         'basilisk.cli.main',
+        'basilisk.cli.encoding',
         'basilisk.cli.scan',
         'basilisk.cli.utils',
         'basilisk.cli.recon',

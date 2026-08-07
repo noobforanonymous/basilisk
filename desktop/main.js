@@ -1,15 +1,29 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, Menu, safeStorage } = require('electron');
 const path = require('path');
 const { spawn, execSync } = require('child_process');
 const fs = require('fs');
 const crypto = require('crypto');
 const http = require('http');
 const net = require('net');
+const os = require('os');
 
 // Generate a random token for backend authentication
 const BASILISK_TOKEN = crypto.randomBytes(32).toString('hex');
 const E2E_MODE = process.env.BASILISK_E2E === '1';
 const E2E_OUT = process.env.BASILISK_E2E_OUT || '';
+const BENCHMARK_TARGET = process.env.BASILISK_BENCHMARK_TARGET || '';
+const BENCHMARK_AUTH_TARGET = process.env.BASILISK_BENCHMARK_AUTH_TARGET || '';
+const BENCHMARK_BASE_URL = process.env.BASILISK_BENCHMARK_BASE_URL || '';
+const BENCHMARK_PROTOCOL = process.env.BASILISK_BENCHMARK_PROTOCOL === '1';
+const BENCHMARK_MODULES = [
+    'injection.direct',
+    'extraction.role_confusion',
+    'exfil.rag_data',
+    'toolabuse.ssrf',
+    'toolabuse.sqli',
+    'toolabuse.command_injection',
+];
+const BENCHMARK_PROBES = ['INJ-001', 'EXT-001', 'EXFIL-007', 'TOOL-001', 'TOOL-006', 'TOOL-010'];
 
 // Fix GPU crashes on Wayland/Intel (prevents 30s startup delay)
 if (process.platform === 'linux') {
@@ -33,6 +47,8 @@ let autoUpdater = null;
 let shuttingDown = false;
 let backendSocket = null;
 let backendSocketReconnectTimer = null;
+let desktopMasterKey = '';
+let desktopMasterKeyBackend = 'python_fallback';
 let releaseChannelInfo = {
     trust_model: 'community-build',
     display_label: 'Community Build',
@@ -66,7 +82,10 @@ const BACKEND_ALLOWLIST = {
         /^\/api\/probes\/effectiveness(?:\/[^/?]+)?(?:$|\?)/,
     ],
     POST: [
+        '/api/scan/preview',
         '/api/scan',
+        '/api/auth/matrix',
+        ...(E2E_MODE ? ['/api/benchmark/protocol'] : []),
         /^\/api\/scan\/[^/]+\/stop$/,
         /^\/api\/scan\/[^/]+\/resume$/,
         /^\/api\/diff$/,
@@ -138,6 +157,18 @@ function closeBackendEventBridge() {
 /**
  * Authenticated backend request from the main process only.
  */
+function backendRequestTimeoutMs(method, endpoint) {
+    const normalizedMethod = String(method || 'GET').toUpperCase();
+    const pathname = String(endpoint || '').split(/[?#]/, 1)[0];
+    if (normalizedMethod === 'POST' && ['/api/auth/matrix', '/api/benchmark/protocol'].includes(pathname)) {
+        return 60000;
+    }
+    if (normalizedMethod === 'POST' && /^\/api\/report\/[^/]+$/.test(pathname)) {
+        return 30000;
+    }
+    return 10000;
+}
+
 function backendRequest(endpoint, { method = 'GET', body = null } = {}) {
     return new Promise((resolve, reject) => {
         if (!isAllowedBackendRequest(method, endpoint)) {
@@ -153,6 +184,7 @@ function backendRequest(endpoint, { method = 'GET', body = null } = {}) {
             headers['Content-Length'] = Buffer.byteLength(payload);
         }
 
+        const timeoutMs = backendRequestTimeoutMs(method, endpoint);
         const req = http.request(url, { method, headers }, (res) => {
             let body = '';
             res.on('data', (chunk) => body += chunk);
@@ -172,7 +204,10 @@ function backendRequest(endpoint, { method = 'GET', body = null } = {}) {
             });
         });
         req.on('error', (e) => reject(e));
-        req.setTimeout(10000, () => { req.destroy(); reject(new Error('Timeout')); });
+        req.setTimeout(timeoutMs, () => {
+            req.destroy();
+            reject(new Error(`Backend request timed out after ${timeoutMs}ms`));
+        });
         if (payload) {
             req.write(payload);
         }
@@ -227,11 +262,102 @@ function backendEnv() {
         ...process.env,
         BASILISK_PORT: backendPort,
         BASILISK_TOKEN: BASILISK_TOKEN,
+        BASILISK_RESTRICTED_WORKER: '1',
     };
-    if (app.isPackaged && releaseChannelInfo && releaseChannelInfo.trust_model === 'community-build') {
-        env.BASILISK_SKIP_NATIVE_INTEGRITY_CHECK = 'true';
+    if (desktopMasterKey) {
+        env.BASILISK_MASTER_KEY = desktopMasterKey;
+        env.BASILISK_MASTER_KEY_SOURCE = desktopMasterKeyBackend;
     }
     return env;
+}
+
+function isFernetKey(value) {
+    if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{43}=$/.test(value)) {
+        return false;
+    }
+    try {
+        return Buffer.from(value.replace(/-/g, '+').replace(/_/g, '/'), 'base64').length === 32;
+    } catch {
+        return false;
+    }
+}
+
+function generateFernetKey() {
+    return crypto.randomBytes(32).toString('base64').replace(/\+/g, '-').replace(/\//g, '_');
+}
+
+function configuredSecretStoreDir() {
+    const configured = String(process.env.BASILISK_SECRET_STORE_DIR || '').trim();
+    if (configured) {
+        return path.resolve(configured.replace(/^~(?=$|[\\/])/, os.homedir()));
+    }
+    return path.join(os.homedir(), '.basilisk');
+}
+
+function writePrivateFileAtomically(destination, content) {
+    fs.mkdirSync(path.dirname(destination), { recursive: true, mode: 0o700 });
+    const temporary = `${destination}.${process.pid}.${crypto.randomBytes(8).toString('hex')}.tmp`;
+    try {
+        fs.writeFileSync(temporary, content, { flag: 'wx', mode: 0o600 });
+        fs.renameSync(temporary, destination);
+        try { fs.chmodSync(destination, 0o600); } catch { /* Windows ACLs apply */ }
+    } finally {
+        try { if (fs.existsSync(temporary)) fs.unlinkSync(temporary); } catch { /* best effort */ }
+    }
+}
+
+function initializeDesktopMasterKey() {
+    desktopMasterKey = '';
+    desktopMasterKeyBackend = 'python_fallback';
+
+    if (process.env.BASILISK_MASTER_KEY) {
+        desktopMasterKeyBackend = 'environment';
+        return;
+    }
+    if (!safeStorage || !safeStorage.isEncryptionAvailable()) {
+        console.warn('[Security] OS-protected secret storage is unavailable; backend key management will be used.');
+        return;
+    }
+
+    let storageBackend = process.platform;
+    if (process.platform === 'linux' && typeof safeStorage.getSelectedStorageBackend === 'function') {
+        storageBackend = safeStorage.getSelectedStorageBackend();
+        if (storageBackend === 'basic_text') {
+            console.warn('[Security] Linux secret storage is using basic_text; refusing to treat it as protected.');
+            return;
+        }
+    }
+
+    const wrappedKeyPath = path.join(app.getPath('userData'), 'basilisk-master-key.enc');
+    let key = '';
+    if (fs.existsSync(wrappedKeyPath)) {
+        key = safeStorage.decryptString(fs.readFileSync(wrappedKeyPath));
+        if (!isFernetKey(key)) {
+            throw new Error('The OS-protected Basilisk master key is invalid; refusing to replace it.');
+        }
+    } else {
+        const secretStoreDir = configuredSecretStoreDir();
+        const legacyKeyPath = path.join(secretStoreDir, 'master.key');
+        const encryptedStorePath = path.join(secretStoreDir, 'secrets.enc');
+
+        if (fs.existsSync(legacyKeyPath)) {
+            key = fs.readFileSync(legacyKeyPath, 'utf8').trim();
+            if (!isFernetKey(key)) {
+                throw new Error('The existing Basilisk master key is invalid; refusing unsafe migration.');
+            }
+        } else if (fs.existsSync(encryptedStorePath)) {
+            console.warn('[Security] Existing encrypted secrets have no local key; deferring to the Python keychain backend.');
+            return;
+        } else {
+            key = generateFernetKey();
+        }
+
+        writePrivateFileAtomically(wrappedKeyPath, safeStorage.encryptString(key));
+    }
+
+    desktopMasterKey = key;
+    desktopMasterKeyBackend = 'electron_safe_storage';
+    console.log(`[Security] Desktop secret key protected by Electron safeStorage (${storageBackend}).`);
 }
 
 function normalizeExternalUrl(url) {
@@ -433,7 +559,9 @@ function startBackend() {
         const venvPython = path.join(projectRoot, 'venv', 'bin', 'python');
         const venvPythonWin = path.join(projectRoot, 'venv', 'Scripts', 'python.exe');
 
-        if (process.platform === 'win32' && fs.existsSync(venvPythonWin)) {
+        if (process.env.BASILISK_PYTHON) {
+            executablePath = process.env.BASILISK_PYTHON;
+        } else if (process.platform === 'win32' && fs.existsSync(venvPythonWin)) {
             executablePath = venvPythonWin;
         } else if (fs.existsSync(venvPython)) {
             executablePath = venvPython;
@@ -501,7 +629,7 @@ function startBackend() {
     });
 }
 
-async function waitForBackendReady(attempts = 40) {
+async function waitForBackendReady(attempts = 120) {
     for (let i = 0; i < attempts; i++) {
         try {
             const health = await backendGet('/health');
@@ -515,7 +643,11 @@ async function waitForBackendReady(attempts = 40) {
                 });
                 if (E2E_MODE) {
                     await new Promise((resolve) => setTimeout(resolve, 300));
-                    await runE2ESmoke();
+                    if (BENCHMARK_TARGET) {
+                        await runE2EBenchmark();
+                    } else {
+                        await runE2ESmoke();
+                    }
                 }
                 return;
             }
@@ -576,6 +708,8 @@ async function runE2ESmoke() {
                 document.getElementById('s-operator').value = 'e2e-operator';
                 document.getElementById('s-ticket').value = 'E2E-100';
                 document.getElementById('s-approval-confirmed').checked = true;
+                document.getElementById('btn-scan-preview').click();
+                await waitFor(() => !document.getElementById('btn-scan-start')?.disabled, 6000, 'cost_preview_ready');
                 document.getElementById('btn-scan-start').click();
                 await waitFor(() => document.querySelectorAll('#live-findings .fc').length >= 1 || document.getElementById('live-count')?.innerText?.includes('1 detected'), 12000, 'finding_visible');
                 await waitFor(() => document.getElementById('btn-scan-stop')?.classList.contains('is-hidden'), 12000, 'scan_complete');
@@ -609,6 +743,8 @@ async function runE2ESmoke() {
                 document.getElementById('s-operator').value = 'e2e-operator';
                 document.getElementById('s-ticket').value = 'E2E-101';
                 document.getElementById('s-approval-confirmed').checked = true;
+                document.getElementById('btn-scan-preview').click();
+                await waitFor(() => !document.getElementById('btn-scan-start')?.disabled, 6000, 'stop_cost_preview_ready');
                 document.getElementById('btn-scan-start').click();
                 await waitFor(() => !document.getElementById('btn-scan-stop')?.classList.contains('is-hidden'), 6000, 'stop_button_visible');
                 document.getElementById('btn-scan-stop')?.click();
@@ -632,6 +768,7 @@ async function runE2ESmoke() {
                     reportOptions,
                     stopWorked,
                     logCapturedCompletion,
+                    costPreviewVisible: document.getElementById('scan-preview-summary')?.innerText?.includes('planned requests') || false,
                 };
             })();
         `, true);
@@ -641,6 +778,134 @@ async function runE2ESmoke() {
             backendReady: true,
             uiReady: true,
             ...snapshot,
+        });
+    } catch (e) {
+        writeE2EStatus({
+            stage: 'ui_error',
+            backendPort,
+            backendReady: true,
+            uiReady: false,
+            error: e.message,
+        });
+    }
+}
+
+async function runE2EBenchmark() {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    for (let i = 0; i < 40; i++) {
+        if (mainWindow.webContents && !mainWindow.webContents.isLoading()) break;
+        await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    const targetJson = JSON.stringify(BENCHMARK_TARGET);
+    const authTargetJson = JSON.stringify(BENCHMARK_AUTH_TARGET);
+    const benchmarkBaseUrlJson = JSON.stringify(BENCHMARK_BASE_URL);
+    const benchmarkProtocolJson = JSON.stringify(BENCHMARK_PROTOCOL);
+    const modulesJson = JSON.stringify(BENCHMARK_MODULES);
+    const probesJson = JSON.stringify(BENCHMARK_PROBES);
+    try {
+        const snapshot = await mainWindow.webContents.executeJavaScript(`
+            (async () => {
+                const target = ${targetJson};
+                const authTarget = ${authTargetJson};
+                const benchmarkBaseUrl = ${benchmarkBaseUrlJson};
+                const runProtocol = ${benchmarkProtocolJson};
+                const modules = ${modulesJson};
+                const probeIds = ${probesJson};
+                const startedAt = performance.now();
+                const scanConfig = {
+                        target,
+                        provider: 'custom',
+                        model: '',
+                        mode: 'standard',
+                        evolve: false,
+                        generations: 1,
+                        modules,
+                        probe_ids: probeIds,
+                        skip_recon: false,
+                        recon_modules: ['rag', 'tools'],
+                        output_format: 'json',
+                        max_findings: 0,
+                        campaign: {
+                            name: 'ground-truth-desktop-benchmark',
+                            authorization: {operator: 'benchmark', ticket_id: 'LAB-ONLY', approved: true},
+                        },
+                        policy: {
+                            execution_mode: 'validate',
+                            isolated_environment: true,
+                            allow_private_targets: true,
+                            allow_insecure_http: true,
+                            max_concurrency: 4,
+                            request_budget: 200,
+                        },
+                    };
+                const previewResult = await window.basilisk.request('/api/scan/preview', {
+                    method: 'POST',
+                    body: scanConfig,
+                });
+                if (!previewResult.preview || previewResult.preview.estimated_requests > previewResult.preview.request_maximum) {
+                    throw new Error('desktop benchmark cost preview was absent or unbounded');
+                }
+                const started = await window.basilisk.request('/api/scan', {
+                    method: 'POST',
+                    body: scanConfig,
+                });
+                if (started.error || !started.session_id) {
+                    throw new Error(started.error || 'desktop benchmark scan did not start');
+                }
+                let status = null;
+                const deadline = performance.now() + 120000;
+                while (performance.now() < deadline) {
+                    await new Promise((resolve) => setTimeout(resolve, 250));
+                    status = await window.basilisk.request('/api/scan/' + started.session_id);
+                    if (['completed', 'complete', 'error', 'failed', 'stopped'].includes(status.status)) break;
+                }
+                if (!status || !['completed', 'complete'].includes(status.status)) {
+                    throw new Error('desktop benchmark timed out or failed: ' + JSON.stringify(status));
+                }
+                const detected = [...new Set((status.findings || []).map((finding) => finding.attack_module).filter(Boolean))].sort();
+                const authReport = await window.basilisk.request('/api/auth/matrix', {
+                    method: 'POST',
+                    body: {
+                        target: authTarget,
+                        provider: 'custom',
+                        model: '',
+                        lab_personas: true,
+                        isolated_environment: true,
+                    },
+                });
+                if (authReport.error || !Array.isArray(authReport.observations)) {
+                    throw new Error(authReport.error || 'desktop authorization matrix failed');
+                }
+                let protocolReport = null;
+                if (runProtocol) {
+                    protocolReport = await window.basilisk.request('/api/benchmark/protocol', {
+                        method: 'POST',
+                        body: {base_url: benchmarkBaseUrl},
+                    });
+                    if (protocolReport.error || !protocolReport.summary?.all_passed) {
+                        throw new Error(protocolReport.error || 'desktop protocol benchmark failed');
+                    }
+                }
+                return {
+                    target,
+                    sessionId: started.session_id,
+                    durationSeconds: (performance.now() - startedAt) / 1000,
+                    findingsCount: status.findings_count || 0,
+                    detectedModules: detected,
+                    profile: status.profile || {},
+                    currentPhase: status.current_phase || '',
+                    costPreview: previewResult.preview,
+                    authReport,
+                    protocolReport,
+                };
+            })();
+        `, true);
+        writeE2EStatus({
+            stage: 'benchmark_complete',
+            backendPort,
+            backendReady: true,
+            uiReady: true,
+            benchmark: snapshot,
         });
     } catch (e) {
         writeE2EStatus({
@@ -696,6 +961,7 @@ function getAutoUpdater() {
 app.whenReady().then(async () => {
     try {
         releaseChannelInfo = loadReleaseChannelInfo();
+        initializeDesktopMasterKey();
         backendPort = await findAvailablePort(process.env.BASILISK_PORT || backendPort);
         startBackend();
         createWindow();

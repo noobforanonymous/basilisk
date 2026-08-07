@@ -6,9 +6,11 @@ Handles selection, elitism, and population diversity tracking for SPE-NL.
 
 from __future__ import annotations
 
-import random
+import hashlib
 from dataclasses import dataclass, field
 from typing import Any
+
+from basilisk.evolution.randomness import random
 
 
 @dataclass
@@ -26,7 +28,12 @@ class Individual:
     bandit_recorded: bool = False
     selection_context: str = ""
     behavioral_profile: dict[str, Any] = field(default_factory=dict)
-    id: str = field(default_factory=lambda: f"ind-{__import__('uuid').uuid4().hex[:8]}")
+    id: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.id:
+            identity = f"{self.generation}\0{self.parent_id or ''}\0{self.operator_used}\0{self.payload}"
+            self.id = f"ind-{hashlib.sha256(identity.encode('utf-8')).hexdigest()[:12]}"
 
     def to_dict(self) -> dict[str, Any]:
         return {

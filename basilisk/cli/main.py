@@ -16,6 +16,7 @@ Commands:
 
 from __future__ import annotations
 
+import os
 import sys
 
 import click
@@ -24,6 +25,10 @@ from rich.panel import Panel
 from rich.text import Text
 
 from basilisk import BANNER, __version__
+from basilisk.cli.encoding import configure_output_encoding
+
+
+configure_output_encoding()
 
 console = Console()
 
@@ -44,9 +49,12 @@ def _validate_cli_secret_arg(option_name: str, value: str) -> str:
     )
 
 
-def _enforce_cli_secret_policy(*, api_key: str = "", attacker_api_key: str = "") -> None:
+def _enforce_cli_secret_policy(
+    *, api_key: str = "", attacker_api_key: str = "", auth: str = ""
+) -> None:
     _validate_cli_secret_arg("--api-key", api_key)
     _validate_cli_secret_arg("--attacker-api-key", attacker_api_key)
+    _validate_cli_secret_arg("--auth", auth)
 
 
 @click.group()
@@ -58,14 +66,18 @@ def cli() -> None:
 
 @cli.command("scan")
 @click.option("-t", "--target", required=True, help="Target URL or API endpoint")
-@click.option("-p", "--provider", default="openai", help="LLM provider (openai, anthropic, google, azure, ollama, github, custom)")
+@click.option("-p", "--provider", default="openai", help="LLM provider (openai, anthropic, google, azure, nvidia, ollama, github, custom, websocket)")
 @click.option("-m", "--model", default="", help="Model name override")
 @click.option("-k", "--api-key", default="", help="API key file reference (@path) or use env vars")
-@click.option("--auth", default="", help="Authorization header value")
+@click.option("--auth", default="", help="Authorization header file reference (@path) or BASILISK_AUTH_HEADER")
 @click.option("--mode", default="standard", type=click.Choice(["quick", "standard", "deep", "stealth", "chaos"]))
+@click.option("--cost-preview", "cost_preview_only", is_flag=True, help="Show the bounded request/token/cost plan and exit without transmitting")
+@click.option("--input-price-per-million", type=click.FloatRange(min=0), default=None, help="Optional provider input-token price in USD per million")
+@click.option("--output-price-per-million", type=click.FloatRange(min=0), default=None, help="Optional provider output-token price in USD per million")
 @click.option("--evolve/--no-evolve", default=True, help="Enable/disable evolution engine")
 @click.option("--generations", default=5, help="Number of evolution generations")
 @click.option("--module", multiple=True, help="Specific attack modules to run (default: all)")
+@click.option("--probe-id", multiple=True, help="Run exact canonical probe IDs (repeatable)")
 @click.option("-o", "--output", default="html", type=click.Choice(["html", "json", "sarif", "markdown", "pdf"]))
 @click.option("--output-dir", default="./basilisk-reports", help="Report output directory")
 @click.option("--no-dashboard", is_flag=True, help="Disable web dashboard")
@@ -89,21 +101,58 @@ def cli() -> None:
 @click.option("--approval-required/--no-approval-required", default=False, help="Require explicit campaign approval")
 @click.option("--approve/--no-approve", default=False, help="Mark campaign approval confirmed")
 @click.option("--dry-run", is_flag=True, help="Plan the scan and stop after recon/policy evaluation")
+@click.option("--max-findings", default=0, type=click.IntRange(min=0), help="Stop after this many persisted findings (0 = mode default/unlimited)")
+@click.option("--stop-on-severity", default="", type=click.Choice(["", "critical", "high", "medium", "low", "info"]), help="Stop when a finding reaches this severity")
+@click.option("--allow-private-targets", is_flag=True, help="Allow loopback/private destinations for an authorized local lab")
+@click.option("--allow-insecure-http", is_flag=True, help="Allow unencrypted HTTP/WS for an authorized local lab")
+@click.option("--isolated-environment", is_flag=True, help="Confirm the target is an isolated lab; required for chaos mode")
 @click.option("-c", "--config", default="", help="YAML config file path")
-def scan(target, provider, model, api_key, auth, mode, evolve, generations, module, recon_module, attacker_provider, attacker_model, attacker_api_key, exit_on_first, diversity_mode, intent_weight, cache, include_research_modules, execution_mode, campaign_name, operator, ticket, approval_required, approve, dry_run, output, output_dir, no_dashboard, fail_on, verbose, debug, skip_recon, config) -> None:
+def scan(target, provider, model, api_key, auth, mode, cost_preview_only, input_price_per_million, output_price_per_million, evolve, generations, module, probe_id, recon_module, attacker_provider, attacker_model, attacker_api_key, exit_on_first, diversity_mode, intent_weight, cache, include_research_modules, execution_mode, campaign_name, operator, ticket, approval_required, approve, dry_run, max_findings, stop_on_severity, allow_private_targets, allow_insecure_http, isolated_environment, output, output_dir, no_dashboard, fail_on, verbose, debug, skip_recon, config) -> None:
     """Run a full red team scan against a target."""
     import asyncio
 
     console.print(BANNER, style="bold red")
     console.print()
-    _enforce_cli_secret_policy(api_key=api_key, attacker_api_key=attacker_api_key)
+    _enforce_cli_secret_policy(api_key=api_key, attacker_api_key=attacker_api_key, auth=auth)
+
+    if not cost_preview_only and os.environ.get("BASILISK_RESTRICTED_WORKER") != "1" and os.environ.get(
+        "BASILISK_DISABLE_PROCESS_ISOLATION", ""
+    ).casefold() not in {"1", "true", "yes", "on"}:
+        from basilisk.runtime.isolation import spawn_restricted_scan
+
+        exit_code = spawn_restricted_scan({
+            "target": target, "provider": provider, "model": model,
+            "api_key": api_key, "auth": auth, "mode": mode,
+            "evolve": evolve, "generations": generations,
+            "module": list(module), "probe_id": list(probe_id),
+            "recon_module": list(recon_module), "attacker_provider": attacker_provider,
+            "attacker_model": attacker_model, "attacker_api_key": attacker_api_key,
+            "exit_on_first": exit_on_first, "diversity_mode": diversity_mode,
+            "intent_weight": intent_weight, "enable_cache": cache,
+            "include_research_modules": include_research_modules,
+            "execution_mode": execution_mode, "campaign_name": campaign_name,
+            "operator": operator, "ticket": ticket,
+            "approval_required": approval_required, "approved": approve,
+            "dry_run": dry_run, "max_findings": max_findings,
+            "stop_on_severity": stop_on_severity,
+            "allow_private_targets": allow_private_targets,
+            "allow_insecure_http": allow_insecure_http,
+            "isolated_environment": isolated_environment,
+            "input_price_per_million": input_price_per_million,
+            "output_price_per_million": output_price_per_million,
+            "output_format": output, "output_dir": output_dir,
+            "no_dashboard": no_dashboard, "fail_on": fail_on,
+            "verbose": verbose, "debug": debug, "skip_recon": skip_recon,
+            "config": config,
+        })
+        raise click.exceptions.Exit(exit_code)
 
     from basilisk.cli.scan import run_scan
 
-    asyncio.run(run_scan(
+    exit_code = asyncio.run(run_scan(
         target=target, provider=provider, model=model, api_key=api_key,
         auth=auth, mode=mode, evolve=evolve, generations=generations,
-        module=list(module), recon_module=list(recon_module), 
+        module=list(module), probe_id=list(probe_id), recon_module=list(recon_module),
         attacker_provider=attacker_provider, attacker_model=attacker_model,
         attacker_api_key=attacker_api_key, 
         exit_on_first=exit_on_first, diversity_mode=diversity_mode,
@@ -116,17 +165,27 @@ def scan(target, provider, model, api_key, auth, mode, evolve, generations, modu
         approval_required=approval_required,
         approved=approve,
         dry_run=dry_run,
+        max_findings=max_findings,
+        stop_on_severity=stop_on_severity,
+        allow_private_targets=allow_private_targets,
+        allow_insecure_http=allow_insecure_http,
+        isolated_environment=isolated_environment,
+        cost_preview_only=cost_preview_only,
+        input_price_per_million=input_price_per_million,
+        output_price_per_million=output_price_per_million,
         output_format=output, 
         output_dir=output_dir, no_dashboard=no_dashboard, fail_on=fail_on, 
         verbose=verbose, debug=debug, skip_recon=skip_recon, config=config,
     ))
+    if exit_code:
+        raise click.exceptions.Exit(exit_code)
 
 
 @cli.command("recon")
 @click.option("-t", "--target", required=True, help="Target URL or API endpoint")
 @click.option("-p", "--provider", default="openai", help="LLM provider")
 @click.option("-k", "--api-key", default="", help="API key file reference (@path) or use env vars")
-@click.option("--auth", default="", help="Authorization header")
+@click.option("--auth", default="", help="Authorization header file reference (@path) or BASILISK_AUTH_HEADER")
 @click.option("--recon-module", multiple=True, help="Specific recon modules to run")
 @click.option("-v", "--verbose", is_flag=True)
 def recon(target, provider, api_key, auth, recon_module, verbose) -> None:
@@ -135,7 +194,7 @@ def recon(target, provider, api_key, auth, recon_module, verbose) -> None:
 
     console.print(BANNER, style="bold red")
     console.print()
-    _enforce_cli_secret_policy(api_key=api_key)
+    _enforce_cli_secret_policy(api_key=api_key, auth=auth)
 
     from basilisk.cli.scan import run_recon
 
@@ -307,12 +366,76 @@ def probes_cmd(category, tag, severity, query, count, json_output, stats) -> Non
         console.print(f"[dim]Showing first 100 of {len(results)}. Use --json for all.[/dim]")
 
 
+@cli.command("auth-test")
+@click.option("-t", "--target", required=True, help="Authorized AI endpoint to test")
+@click.option("-p", "--provider", default="custom", help="Provider adapter")
+@click.option("-m", "--model", default="", help="Target model")
+@click.option("--personas", "personas_path", default="", help="JSON persona file using credential environment-variable references")
+@click.option("--lab-personas", is_flag=True, help="Use the bundled local-lab personas")
+@click.option("--isolated-environment", is_flag=True, help="Allow an authorized loopback/private lab target")
+@click.option("--json-output", default="", help="Optional JSON report path")
+def auth_test_cmd(target, provider, model, personas_path, lab_personas, isolated_environment, json_output) -> None:
+    """Replay authorization probes across anonymous, user, admin, tenant, and invalid credentials."""
+    import asyncio
+    import json
+    from pathlib import Path
+
+    from basilisk.auth_testing import AuthPersona, CredentialState, lab_personas as default_lab_personas, run_auth_matrix
+    from basilisk.core.config import BasiliskConfig, TargetConfig
+    from basilisk.policy.models import ScanPolicy
+
+    if lab_personas:
+        selected_personas = default_lab_personas()
+    elif personas_path:
+        raw = json.loads(Path(personas_path).read_text("utf-8"))
+        selected_personas = []
+        for item in raw:
+            if any(key in item for key in ("api_key", "authorization", "token", "password", "secret")):
+                raise click.ClickException(
+                    "Persona files must reference credentials through authorization_env; inline secrets are rejected."
+                )
+            selected_personas.append(AuthPersona(
+                id=item["id"],
+                role=item.get("role", "user"),
+                tenant=item.get("tenant", "public"),
+                credential_state=CredentialState(item.get("credential_state", "valid")),
+                authorization_env=item.get("authorization_env", ""),
+            ))
+    else:
+        raise click.ClickException("Choose --lab-personas or provide --personas PATH.")
+
+    cfg = BasiliskConfig(
+        target=TargetConfig(url=target, provider=provider, model=model),
+        policy=ScanPolicy(
+            isolated_environment=isolated_environment,
+            allow_private_targets=isolated_environment,
+            allow_insecure_http=isolated_environment,
+            request_budget=max(50, len(selected_personas) * 8),
+            max_concurrency=4,
+        ),
+    )
+    errors = cfg.validate()
+    if errors:
+        raise click.ClickException("; ".join(errors))
+    report = asyncio.run(run_auth_matrix(
+        cfg,
+        selected_personas,
+        known_canaries=["RAG_TENANT_A_CANARY_91C2", "RAG_TENANT_B_CANARY_4D8E"],
+    )).to_dict()
+    rendered = json.dumps(report, indent=2)
+    if json_output:
+        Path(json_output).write_text(rendered + "\n", encoding="utf-8")
+        console.print(f"[green]Authorization matrix saved to {json_output}[/green]")
+    else:
+        click.echo(rendered)
+
+
 @cli.command("interactive")
 @click.option("-t", "--target", required=True, help="Target URL or API endpoint")
 @click.option("-p", "--provider", default="openai", help="LLM provider")
 @click.option("-m", "--model", default="", help="Model name")
 @click.option("-k", "--api-key", default="", help="API key file reference (@path) or use env vars")
-@click.option("--auth", default="", help="Authorization header")
+@click.option("--auth", default="", help="Authorization header file reference (@path) or BASILISK_AUTH_HEADER")
 @click.option("-v", "--verbose", is_flag=True)
 def interactive(target, provider, model, api_key, auth, verbose) -> None:
     """Launch interactive REPL for manual + assisted red teaming."""
@@ -320,7 +443,7 @@ def interactive(target, provider, model, api_key, auth, verbose) -> None:
 
     console.print(BANNER, style="bold red")
     console.print()
-    _enforce_cli_secret_policy(api_key=api_key)
+    _enforce_cli_secret_policy(api_key=api_key, auth=auth)
 
     from basilisk.cli.interactive import run_interactive
 
@@ -385,7 +508,7 @@ def diff(target, api_key, category, output_dir, verbose) -> None:
     from datetime import datetime, timezone
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     path = Path(output_dir) / f"diff_{ts}.json"
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
         json.dump(report.to_dict(), f, indent=2, default=str)
     console.print(f"\n[green]✓[/green] Diff report saved to: {path}")
 
@@ -395,7 +518,7 @@ def diff(target, api_key, category, output_dir, verbose) -> None:
 @click.option("-p", "--provider", default="openai", help="LLM provider")
 @click.option("-m", "--model", default="", help="Model name")
 @click.option("-k", "--api-key", default="", help="API key file reference (@path) or use env vars")
-@click.option("--auth", default="", help="Authorization header")
+@click.option("--auth", default="", help="Authorization header file reference (@path) or BASILISK_AUTH_HEADER")
 @click.option("--output-dir", default="./basilisk-reports", help="Report output directory")
 @click.option("--json", "json_output", is_flag=True, help="Output as JSON only (for CI)")
 @click.option("-v", "--verbose", is_flag=True)
@@ -406,7 +529,7 @@ def posture(target, provider, model, api_key, auth, output_dir, json_output, ver
     if not json_output:
         console.print(BANNER, style="bold red")
         console.print()
-    _enforce_cli_secret_policy(api_key=api_key)
+    _enforce_cli_secret_policy(api_key=api_key, auth=auth)
 
     from basilisk.core.config import BasiliskConfig
     from basilisk.cli.scan import _create_provider
@@ -741,6 +864,63 @@ def _help_examples() -> None:
         title="Examples",
         border_style="green",
     ))
+
+
+@cli.command("audit-verify")
+@click.argument("path", type=click.Path(exists=True, dir_okay=False, path_type=str))
+@click.option(
+    "--public-key",
+    default="",
+    help="Trusted Ed25519 public key in hexadecimal form (recommended for authenticity).",
+)
+@click.option(
+    "--public-key-file",
+    type=click.Path(exists=True, dir_okay=False, path_type=str),
+    default="",
+    help="File containing the independently distributed trusted public key.",
+)
+@click.option(
+    "--allow-embedded-key",
+    is_flag=True,
+    help="Integrity-only diagnostic mode; does not establish external authenticity.",
+)
+def audit_verify(path: str, public_key: str, public_key_file: str, allow_embedded_key: bool) -> None:
+    """Verify an audit JSONL hash chain and its available signatures."""
+    from basilisk.core.audit import verify_audit_log
+
+    if public_key and public_key_file:
+        raise click.UsageError("Use either --public-key or --public-key-file, not both")
+    trusted_key = public_key
+    if public_key_file:
+        from pathlib import Path
+
+        trusted_key = Path(public_key_file).read_text(encoding="utf-8").strip()
+    result = verify_audit_log(
+        path,
+        trusted_public_key=trusted_key,
+        allow_embedded_key=allow_embedded_key,
+    )
+    color = "green" if result.valid else "red"
+    console.print(
+        f"[{color}]{'VALID' if result.valid else 'INVALID'}[/{color}] "
+        f"entries={result.entry_count} chain={result.chain_valid} "
+        f"signed={result.signed} signatures={result.signatures_valid} "
+        f"trust_anchored={result.trust_anchored}"
+    )
+    for error in result.errors:
+        console.print(f"[red]- {error}[/red]")
+    if not result.valid:
+        raise click.exceptions.Exit(1)
+
+
+@cli.command("audit-trust-export")
+@click.argument("path", type=click.Path(dir_okay=False, path_type=str))
+def audit_trust_export(path: str) -> None:
+    """Export the persistent audit public key for independent trusted storage."""
+    from basilisk.core.audit import export_audit_trust_anchor
+
+    export_audit_trust_anchor(path)
+    console.print(f"[green]Exported audit trust anchor:[/green] {path}")
 
 
 def main() -> None:

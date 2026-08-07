@@ -224,7 +224,18 @@ async function loadAudit() {
             container.appendChild(el);
         });
 
-        integrity.innerText = `${entries.length} entries | File: ${result.path || '?'} | Chain integrity: SHA-256 checksummed`;
+        const verification = result.verification || {};
+        if (verification.valid) {
+            const signature = verification.signed
+                ? 'Ed25519 signatures valid (embedded key)'
+                : 'unsigned';
+            integrity.innerText = `${entries.length} entries | Hash chain valid | ${signature} | File: ${result.path || '?'}`;
+            integrity.classList.remove('danger-text');
+        } else {
+            const reason = (verification.errors || []).join('; ') || 'verification failed';
+            integrity.innerText = `${entries.length} entries | INVALID AUDIT TRAIL: ${reason}`;
+            integrity.classList.add('danger-text');
+        }
         log('ok', `Loaded ${entries.length} audit entries for session ${sessionId}`);
     } catch (e) {
         log('err', `Audit load failed: ${e.message}`);
@@ -265,7 +276,7 @@ async function clearSessionHistory() {
 export function initSessions() {
     document.getElementById('btn-refresh-sess')?.addEventListener('click', loadSessions);
     document.getElementById('btn-clear-sess')?.addEventListener('click', clearSessionHistory);
-    ['openai', 'anthropic', 'google', 'github', 'xai', 'groq'].forEach((provider) => {
+    ['openai', 'anthropic', 'google', 'github', 'xai', 'groq', 'nvidia'].forEach((provider) => {
         document.getElementById(`btn-save-key-${provider}`)?.addEventListener('click', () => saveKey(provider));
     });
     document.getElementById('btn-gen-report')?.addEventListener('click', generateReport);

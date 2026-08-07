@@ -7,7 +7,7 @@ from functools import lru_cache
 from typing import TYPE_CHECKING
 
 from basilisk.core.evidence import EvidenceVerdict
-from basilisk.core.finding import Finding, Severity
+from basilisk.core.finding import Finding, FindingValidationLevel, Severity
 from basilisk.policy.models import EvidenceThreshold
 
 if TYPE_CHECKING:
@@ -42,7 +42,12 @@ def _descriptor_map() -> dict[str, _FindingDescriptor]:
     return mapping
 
 
-def enforce_finding_policy(finding: Finding, policy: ScanPolicy) -> Finding:
+def enforce_finding_policy(
+    finding: Finding,
+    policy: ScanPolicy,
+    *,
+    final: bool = True,
+) -> Finding:
     """Downgrade or annotate findings that do not meet policy evidence requirements."""
 
     from basilisk.attacks.base import AttackTrustTier
@@ -66,8 +71,18 @@ def enforce_finding_policy(finding: Finding, policy: ScanPolicy) -> Finding:
         "module_success_criteria": descriptor.success_criteria,
         "module_evidence_requirements": descriptor.evidence_requirements,
     }
+    if finding.validation_level == FindingValidationLevel.OBSERVATION and actual in {
+        EvidenceVerdict.PROBABLE,
+        EvidenceVerdict.STRONG,
+        EvidenceVerdict.CONFIRMED,
+    }:
+        finding.validation_level = FindingValidationLevel.CANDIDATE
+    if not final:
+        return finding
     if finding.severity in {Severity.CRITICAL, Severity.HIGH} and (
-        not _meets_threshold(actual, required) or missing_requirements
+        finding.validation_level != FindingValidationLevel.VERIFIED
+        or not _meets_threshold(actual, required)
+        or missing_requirements
     ):
         finding.metadata = {
             **finding.metadata,
@@ -77,6 +92,7 @@ def enforce_finding_policy(finding: Finding, policy: ScanPolicy) -> Finding:
             "actual_evidence_verdict": actual.value,
             "policy_success_criteria": descriptor.success_criteria,
             "missing_evidence_requirements": missing_requirements,
+            "validation_level": finding.validation_level.value,
         }
         finding.severity = Severity.MEDIUM
     return finding

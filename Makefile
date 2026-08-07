@@ -6,7 +6,7 @@ PIP = $(PYTHON) -m pip
 NATIVE_DIR = native
 DESKTOP_DIR = desktop
 REPORT_DIR = basilisk-reports
-REQ_FILE := $(if $(wildcard requirements.lock),requirements.lock,requirements.txt)
+REQ_FILE := requirements.lock
 
 all: build-native build-backend  ## Build everything (native extensions + backend binary)
 
@@ -15,10 +15,10 @@ help: ## Show this help message
 
 install: ## Install all dependencies (Python + Desktop)
 	@echo "Installing Python dependencies..."
-	$(PIP) install -r $(REQ_FILE)
-	$(PIP) install --no-deps -e .
+	$(PIP) install --require-hashes -r $(REQ_FILE)
+	$(PIP) install --no-build-isolation --no-deps -e .
 	@echo "Installing Desktop dependencies..."
-	cd $(DESKTOP_DIR) && npm install
+	cd $(DESKTOP_DIR) && npm ci
 
 build: build-native ## Build all components
 
@@ -52,13 +52,20 @@ dev: build-native ## Run the desktop application in development mode
 
 test: build-native ## Run all tests (requires built native extensions)
 	@echo "Running test suite..."
+	$(PYTHON) scripts/verify_dependency_locks.py
 	$(PYTHON) -m pytest tests/
 
 lint: ## Run linting checks
-	@echo "Running Ruff/Flake8 check..."
-	ruff check . || true
+	@echo "Running release-blocking Ruff checks..."
+	ruff check . --select E9,F63,F7,F82
 	@echo "Running Go lint..."
 	cd $(NATIVE_DIR)/go && go vet ./...
+	@echo "Running C encoder test..."
+	$(CC) -O2 -Wall -Wextra -Werror native/c/encoder.c native/c/test_encoder.c -I native/c -o /tmp/basilisk-encoder-test
+	/tmp/basilisk-encoder-test
+
+lint-all: ## Run the complete Ruff rule set, including migration debt
+	ruff check .
 
 clean: ## Remove build artifacts and temporary files
 	@echo "Cleaning native artifacts..."

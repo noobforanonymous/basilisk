@@ -5,7 +5,6 @@ Tests for Basilisk Report Generation — JSON, SARIF, Markdown, HTML, PDF.
 from __future__ import annotations
 
 import json
-import pytest
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -99,7 +98,7 @@ class TestSARIF:
         generate_sarif(session, path)
 
         assert path.exists()
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             sarif = json.load(f)
 
         assert sarif["version"] == "2.1.0"
@@ -111,7 +110,7 @@ class TestSARIF:
         path = tmp_path / "test.sarif"
         generate_sarif(session, path)
 
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             sarif = json.load(f)
 
         rules = sarif["runs"][0]["tool"]["driver"]["rules"]
@@ -122,7 +121,7 @@ class TestSARIF:
         path = tmp_path / "test.sarif"
         generate_sarif(session, path)
 
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             sarif = json.load(f)
 
         results = sarif["runs"][0]["results"]
@@ -140,7 +139,7 @@ class TestSARIF:
         path = tmp_path / "empty.sarif"
         generate_sarif(session, path)
 
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             sarif = json.load(f)
 
         assert sarif["runs"][0]["results"] == []
@@ -157,7 +156,7 @@ class TestHTML:
         generate_html(session, path)
 
         assert path.exists()
-        content = path.read_text()
+        content = path.read_text(encoding="utf-8")
         assert "<!DOCTYPE html>" in content
         assert "Basilisk Scan Report" in content
         assert "test-session-001" in content
@@ -169,7 +168,7 @@ class TestHTML:
         path = tmp_path / "test.html"
         generate_html(session, path)
 
-        content = path.read_text()
+        content = path.read_text(encoding="utf-8")
         assert "System Prompt Extracted" in content
         assert "CRITICAL" in content
         assert "PRODUCTION" in content
@@ -182,7 +181,7 @@ class TestHTML:
         path = tmp_path / "empty.html"
         generate_html(session, path)
 
-        content = path.read_text()
+        content = path.read_text(encoding="utf-8")
         assert "No vulnerabilities detected" in content
 
     def test_html_autoescapes_content(self, tmp_path):
@@ -195,7 +194,7 @@ class TestHTML:
         path = tmp_path / "escaped.html"
         generate_html(session, path, include_raw_content=True)
 
-        content = path.read_text()
+        content = path.read_text(encoding="utf-8")
         assert "<script>alert(1)</script>" not in content
         assert "&lt;script&gt;alert(1)&lt;/script&gt;" in content
         assert "&lt;b&gt;payload&lt;/b&gt;" in content
@@ -212,7 +211,7 @@ class TestJSON:
         _write_json_report(session, path)
 
         assert path.exists()
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             data = json.load(f)
 
         assert data["basilisk_version"] == __version__
@@ -233,7 +232,7 @@ class TestMarkdown:
         _write_markdown_report(session, path)
 
         assert path.exists()
-        content = path.read_text()
+        content = path.read_text(encoding="utf-8")
         assert "# 🐍 Basilisk Scan Report" in content
         assert "CRITICAL" in content
         assert "System Prompt Extracted" in content
@@ -253,6 +252,8 @@ class TestPDF:
         _generate_pdf_text_fallback(session, path)
 
         assert path.exists()
-        content = path.read_text()
-        assert "BASILISK SCAN REPORT" in content
-        assert "CRITICAL" in content
+        content = path.read_bytes()
+        assert content.startswith(b"%PDF-1.4")
+        assert b"BASILISK SCAN REPORT" in content
+        assert b"CRITICAL" in content
+        assert content.rstrip().endswith(b"%%EOF")

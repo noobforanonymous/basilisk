@@ -7,8 +7,13 @@ exact context window boundary.
 
 from __future__ import annotations
 
+import asyncio
+import logging
+
 from basilisk.core.profile import BasiliskProfile
 from basilisk.providers.base import ProviderAdapter, ProviderMessage
+
+logger = logging.getLogger("basilisk.recon.context")
 
 
 FILLER_WORD = "test "  # ~1 token per word
@@ -65,7 +70,10 @@ async def measure_context_window(
                 last_success = mid
                 low = mid + 1
 
-        except Exception:
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("Context-window probe failed at %s tokens: %s", mid, type(exc).__name__)
             high = mid - 1
 
     profile.context_window = last_success

@@ -1,25 +1,27 @@
 """
 Basilisk Audit Logger — forensic logging for all scan operations.
 
-Provides tamper-evident, append-only audit trails for every prompt sent,
-response received, and finding discovered. On by default for legal
-protection and enterprise compliance.
+Provides tamper-evident, append-only audit trails for significant scan,
+policy, finding, error, and report events. Prompt and response logging is
+available to callers that explicitly enable those event hooks.
 """
 
 from __future__ import annotations
 
 import base64
-import json
 import hashlib
+import json
 import logging
 import os
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from basilisk.core.secrets import SecretStore
-from basilisk.core.schema import SCHEMA_VERSION_LABEL
 from basilisk.core.retention import prune_artifact_dir
+from basilisk.core.redaction import redacted_descriptor, sanitize_error_text, sanitize_mapping
+from basilisk.core.schema import SCHEMA_VERSION_LABEL
+from basilisk.core.secrets import SecretStore
 
 try:
     from cryptography.hazmat.primitives import serialization
@@ -30,6 +32,207 @@ except ImportError:  # pragma: no cover - depends on optional runtime state
 
 logger = logging.getLogger("basilisk.audit")
 _AUDIT_KEY_SECRET_NAME = "AUDIT_SIGNING_KEY"
+
+
+@dataclass(frozen=True)
+class AuditVerificationResult:
+    """Result of independently checking an audit file's hash chain and signatures."""
+
+    valid: bool
+    entry_count: int
+    chain_valid: bool
+    signed: bool
+    signatures_valid: bool
+    trust_anchored: bool
+    trusted_key_match: bool | None
+    public_key: str
+    errors: tuple[str, ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "valid": self.valid,
+            "entry_count": self.entry_count,
+            "chain_valid": self.chain_valid,
+            "signed": self.signed,
+            "signatures_valid": self.signatures_valid,
+            "trust_anchored": self.trust_anchored,
+            "trusted_key_match": self.trusted_key_match,
+            "public_key": self.public_key,
+            "errors": list(self.errors),
+        }
+
+
+def verify_audit_log(
+    path: str | Path,
+    *,
+    trusted_public_key: str = "",
+    allow_embedded_key: bool = False,
+) -> AuditVerificationResult:
+    """Verify chaining and signatures against an independently supplied trust anchor."""
+    audit_path = Path(path)
+    errors: list[str] = []
+    entries: list[dict[str, Any]] = []
+    try:
+        for line_number, line in enumerate(
+            audit_path.read_text(encoding="utf-8").splitlines(), start=1
+        ):
+            if not line.strip():
+                continue
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError as exc:
+                errors.append(f"line {line_number}: invalid JSON ({exc.msg})")
+                continue
+            if not isinstance(entry, dict):
+                errors.append(f"line {line_number}: audit entry must be an object")
+                continue
+            entries.append(entry)
+    except OSError as exc:
+        return AuditVerificationResult(
+            valid=False,
+            entry_count=0,
+            chain_valid=False,
+            signed=False,
+            signatures_valid=False,
+            trust_anchored=False,
+            trusted_key_match=None,
+            public_key="",
+            errors=(str(exc),),
+        )
+
+    trusted_public_key = _resolve_trusted_public_key(trusted_public_key)
+    embedded_key = ""
+    if entries:
+        start_data = entries[0].get("data", {})
+        if isinstance(start_data, dict):
+            embedded_key = str(start_data.get("public_key", ""))
+    trust_anchored = bool(trusted_public_key.strip())
+    public_key_hex = trusted_public_key.strip() or embedded_key
+    trusted_key_match = (
+        None if not trusted_public_key else embedded_key == trusted_public_key.strip()
+    )
+    if trusted_key_match is False:
+        errors.append("embedded audit public key does not match the trusted key")
+    if not trust_anchored and not allow_embedded_key:
+        errors.append(
+            "no external audit trust anchor supplied; use --public-key/--public-key-file "
+            "or configure BASILISK_AUDIT_TRUSTED_PUBLIC_KEY_FILE"
+        )
+
+    verifier = None
+    if public_key_hex and ed25519 is not None:
+        try:
+            verifier = ed25519.Ed25519PublicKey.from_public_bytes(bytes.fromhex(public_key_hex))
+        except (ValueError, TypeError) as exc:
+            errors.append(f"invalid audit public key: {exc}")
+    elif public_key_hex and ed25519 is None:
+        errors.append("cryptography is unavailable; signatures cannot be verified")
+
+    previous_checksum = "0" * 64
+    chain_valid = True
+    signatures_valid = True
+    expects_signatures = bool(public_key_hex)
+    signed = expects_signatures
+    for expected_seq, entry in enumerate(entries):
+        if entry.get("seq") != expected_seq:
+            errors.append(f"entry {expected_seq}: unexpected sequence number")
+            chain_valid = False
+        if entry.get("prev_checksum") != previous_checksum:
+            errors.append(f"entry {expected_seq}: previous checksum mismatch")
+            chain_valid = False
+
+        core = {
+            "seq": entry.get("seq"),
+            "timestamp": entry.get("timestamp"),
+            "event": entry.get("event"),
+            "data": entry.get("data"),
+            "prev_checksum": entry.get("prev_checksum"),
+        }
+        core_json = json.dumps(core, default=str, separators=(",", ":"))
+        calculated = hashlib.sha256(core_json.encode()).hexdigest()
+        if entry.get("checksum") != calculated:
+            errors.append(f"entry {expected_seq}: checksum mismatch")
+            chain_valid = False
+
+        raw_signature = entry.get("signature", "")
+        signature = raw_signature if isinstance(raw_signature, str) else ""
+        if signature:
+            signed = True
+            if verifier is None:
+                signatures_valid = False
+            else:
+                try:
+                    verifier.verify(bytes.fromhex(signature), core_json.encode())
+                except (ValueError, TypeError) as exc:
+                    errors.append(f"entry {expected_seq}: invalid signature ({exc})")
+                    signatures_valid = False
+                except Exception:
+                    errors.append(f"entry {expected_seq}: signature verification failed")
+                    signatures_valid = False
+        elif expects_signatures:
+            errors.append(f"entry {expected_seq}: signature missing")
+            signatures_valid = False
+        previous_checksum = calculated
+
+    if not entries:
+        errors.append("audit log contains no entries")
+        chain_valid = False
+    if signed and not public_key_hex:
+        errors.append("signed entries have no verification key")
+        signatures_valid = False
+
+    valid = (
+        chain_valid
+        and signed
+        and signatures_valid
+        and trusted_key_match is not False
+        and (trust_anchored or allow_embedded_key)
+    )
+    return AuditVerificationResult(
+        valid=valid,
+        entry_count=len(entries),
+        chain_valid=chain_valid,
+        signed=signed,
+        signatures_valid=signatures_valid if signed else False,
+        trust_anchored=trust_anchored,
+        trusted_key_match=trusted_key_match,
+        public_key=embedded_key,
+        errors=tuple(errors),
+    )
+
+
+def _resolve_trusted_public_key(explicit: str) -> str:
+    if explicit.strip():
+        return explicit.strip()
+    key_file = os.environ.get("BASILISK_AUDIT_TRUSTED_PUBLIC_KEY_FILE", "").strip()
+    if key_file:
+        try:
+            return Path(key_file).expanduser().read_text(encoding="utf-8").strip()
+        except OSError as exc:
+            logger.error("Unable to read configured audit trust anchor: %s", exc)
+            return ""
+    return os.environ.get("BASILISK_AUDIT_TRUSTED_PUBLIC_KEY", "").strip()
+
+
+def export_audit_trust_anchor(path: str | Path) -> str:
+    """Export the persistent audit signing public key for independent distribution."""
+    key_material = ""
+    key_file = os.environ.get("BASILISK_AUDIT_KEY_FILE", "").strip()
+    if key_file:
+        key_material = Path(key_file).expanduser().read_text(encoding="utf-8").strip()
+    if not key_material:
+        key_material = SecretStore().get(_AUDIT_KEY_SECRET_NAME).strip()
+    private_key = _load_private_key_material(key_material) if key_material else None
+    if private_key is None or serialization is None:
+        raise RuntimeError("No persistent Ed25519 audit signing key is available to export")
+    public_key = private_key.public_key().public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw,
+    ).hex()
+    output = Path(path).expanduser()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(public_key + "\n", encoding="utf-8", newline="\n")
+    return public_key
 
 
 class AuditLogger:
@@ -156,10 +359,10 @@ class AuditLogger:
         )
         return generated_key
 
-    def _write_entry(self, event: str, data: dict[str, Any]) -> None:
+    def _write_entry(self, event: str, data: dict[str, Any]) -> dict[str, Any] | None:
         """Write a single audit entry to the log file."""
         if not self.enabled or not self._file:
-            return
+            return None
 
         entry = {
             "seq": self._entry_count,
@@ -183,6 +386,7 @@ class AuditLogger:
         self._file.write(json.dumps(entry, default=str) + "\n")
         self._file.flush()
         self._entry_count += 1
+        return entry
 
     def log_scan_config(self, config: dict[str, Any]) -> None:
         """Log the scan configuration (with API keys redacted)."""
@@ -214,7 +418,7 @@ class AuditLogger:
         """Log a prompt being sent to the target."""
         self._write_entry("prompt_sent", {
             "module": module,
-            "prompt_preview": prompt[:500],
+            "prompt_preview": redacted_descriptor(prompt),
             "prompt_hash": hashlib.sha256(prompt.encode()).hexdigest(),
             "prompt_length": len(prompt),
             "provider": provider,
@@ -233,7 +437,7 @@ class AuditLogger:
         """Log a response received from the target."""
         self._write_entry("response_received", {
             "module": module,
-            "response_preview": response[:500],
+            "response_preview": redacted_descriptor(response),
             "response_hash": hashlib.sha256(response.encode()).hexdigest(),
             "response_length": len(response),
             "latency_ms": round(latency_ms, 2),
@@ -241,9 +445,9 @@ class AuditLogger:
             "was_refusal": was_refusal,
         })
 
-    def log_finding(self, finding_data: dict[str, Any]) -> None:
+    def log_finding(self, finding_data: dict[str, Any]) -> dict[str, Any] | None:
         """Log a vulnerability finding."""
-        self._write_entry("finding_discovered", {
+        return self._write_entry("finding_discovered", {
             "finding_id": finding_data.get("id", ""),
             "title": finding_data.get("title", ""),
             "severity": finding_data.get("severity", ""),
@@ -251,6 +455,11 @@ class AuditLogger:
             "owasp_id": finding_data.get("owasp_id", ""),
             "confidence": finding_data.get("confidence", 0),
             "module": finding_data.get("attack_module", ""),
+            "validation_level": finding_data.get("validation_level", "observation"),
+            "attempt_count": finding_data.get("attempt_count", 0),
+            "success_count": finding_data.get("success_count", 0),
+            "negative_control_passed": finding_data.get("negative_control_passed", False),
+            "response_fingerprint": finding_data.get("response_fingerprint", ""),
         })
 
     def log_evolution_generation(
@@ -281,7 +490,7 @@ class AuditLogger:
         """Log an error."""
         self._write_entry("error", {
             "module": module,
-            "error": error[:1000],
+            "error": sanitize_error_text(error),
         })
 
     def log_report_generated(self, format: str, path: str) -> None:
@@ -315,16 +524,7 @@ class AuditLogger:
 
 def _redact_secrets(data: dict[str, Any]) -> dict[str, Any]:
     """Redact sensitive fields from a config dictionary."""
-    sensitive_keys = {"api_key", "token", "secret", "password", "auth_header", "authorization"}
-    redacted = {}
-    for key, value in data.items():
-        if isinstance(value, dict):
-            redacted[key] = _redact_secrets(value)
-        elif any(s in key.lower() for s in sensitive_keys):
-            redacted[key] = "***REDACTED***" if value else ""
-        else:
-            redacted[key] = value
-    return redacted
+    return sanitize_mapping(data, include_raw=False, redact_all_strings=False)
 
 
 def _get_version() -> str:

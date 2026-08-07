@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import random
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -24,6 +23,7 @@ from basilisk.evolution.fitness import AttackGoal, FitnessResult, evaluate_fitne
 from basilisk.evolution.intent import IntentTracker
 from basilisk.evolution.operators import ALL_OPERATORS, MutationOperator
 from basilisk.evolution.population import Individual, Population
+from basilisk.evolution.randomness import random
 from basilisk.providers.base import ProviderAdapter, ProviderMessage
 
 logger = logging.getLogger("basilisk.evolution")
@@ -45,6 +45,8 @@ class EvolutionResult:
     intent_stats: dict[str, Any] = field(default_factory=dict)
     curiosity_stats: dict[str, Any] = field(default_factory=dict)
     operator_learning: dict[str, Any] = field(default_factory=dict)
+    random_seed: int = 0
+    lineage: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def success(self) -> bool:
@@ -127,6 +129,19 @@ class EvolutionEngine:
         goal: AttackGoal,
         system_context: list[ProviderMessage] | None = None,
     ) -> EvolutionResult:
+        """Run evolution with a scan-local deterministic random generator."""
+        token = random.set_seed(self.config.random_seed)
+        try:
+            return await self._evolve_seeded(seed_payloads, goal, system_context)
+        finally:
+            random.reset(token)
+
+    async def _evolve_seeded(
+        self,
+        seed_payloads: list[str],
+        goal: AttackGoal,
+        system_context: list[ProviderMessage] | None = None,
+    ) -> EvolutionResult:
         """
         Run the full evolution loop.
 
@@ -139,6 +154,7 @@ class EvolutionEngine:
             EvolutionResult with breakthroughs and statistics
         """
         result = EvolutionResult()
+        result.random_seed = self.config.random_seed
         context = system_context or []
         self._active_context_key = self._context_key(goal)
 
@@ -302,8 +318,10 @@ class EvolutionEngine:
                             operator_used="diversity_injection",
                         ))
                     logger.info(f"Diversity injection: added {len(injected)} fresh seeds")
+                except (ImportError, ValueError) as exc:
+                    logger.debug("Diversity seed injection unavailable: %s", exc)
                 except Exception:
-                    pass  # Graceful fallback if payloads module unavailable
+                    logger.exception("Unexpected diversity seed-injection failure")
 
             stats["mutations_applied"] = len(offspring)
             self._total_mutations += len(offspring)
@@ -362,6 +380,13 @@ class EvolutionEngine:
 
         result.curiosity_stats = self.behavioral_space.stats()
         result.operator_learning = self._operator_learning_summary()
+        result.lineage = [
+            individual.to_dict()
+            for individual in sorted(
+                self.population.individuals,
+                key=lambda item: (item.generation, item.id),
+            )
+        ]
 
         return result
 
@@ -494,11 +519,17 @@ class EvolutionEngine:
         # Build offspring in parallel (limited for LLM calls)
         sem = asyncio.Semaphore(15)
         
-        async def sem_create():
-            async with sem:
-                return await create_one()
+        offspring_seeds = [random.getrandbits(128) for _ in range(target_count)]
 
-        tasks = [sem_create() for _ in range(target_count)]
+        async def sem_create(seed: int):
+            token = random.set_seed(seed)
+            try:
+                async with sem:
+                    return await create_one()
+            finally:
+                random.reset(token)
+
+        tasks = [sem_create(seed) for seed in offspring_seeds]
         offspring = await asyncio.gather(*tasks)
         return list(offspring)
 

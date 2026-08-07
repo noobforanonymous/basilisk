@@ -137,10 +137,13 @@ That is the fastest way to understand why one module is safer to run by default 
 
 You can enter provider API keys in the scan form, and the desktop app can also persist provider keys through the settings path.
 
-The current build stores secrets through Basilisk’s secret store backend. Depending on the environment, that may use:
+The current build stores values in a Fernet-encrypted file. The encryption key is protected by the strongest backend available:
 
-- keyring-backed storage
-- encrypted local storage
+- Electron `safeStorage` on Windows, macOS, and Linux desktops with a real secret-service backend
+- the operating-system keyring for CLI and backend-only use
+- a permission-restricted local key file only when protected storage is unavailable
+
+On headless Linux, Electron may report the `basic_text` backend. Basilisk rejects that backend as protected storage and lets the Python secret manager select the documented fallback instead. Existing local master keys are wrapped during the first supported desktop startup so stored values remain readable.
 
 You can see the active secret-store status in `Settings`.
 

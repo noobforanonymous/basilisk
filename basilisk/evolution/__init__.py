@@ -23,7 +23,8 @@ the engine generates 2-3 evolved variants and retries them before moving on.
 from __future__ import annotations
 
 import copy
-import random
+from random import Random as RandomGenerator
+from basilisk.evolution.randomness import random
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -219,7 +220,7 @@ def _swap_metaphors(text: str, n: int = 2) -> str:
 def mutate(
     genome: CultivationGenome,
     mutation_rate: float = 0.45,
-    rng: random.Random | None = None,
+    rng: RandomGenerator | None = None,
 ) -> CultivationGenome:
     """
     Produce a mutated child genome.
@@ -280,7 +281,7 @@ def mutate(
 def crossover(
     genome_a: CultivationGenome,
     genome_b: CultivationGenome,
-    rng: random.Random | None = None,
+    rng: RandomGenerator | None = None,
 ) -> CultivationGenome:
     """
     Splice two parent genomes into a hybrid child.
@@ -347,7 +348,7 @@ def crossover(
 def tournament_select(
     population: list[CultivationGenome],
     k: int = 3,
-    rng: random.Random | None = None,
+    rng: RandomGenerator | None = None,
 ) -> CultivationGenome:
     """
     Select the fittest genome from k random candidates.
@@ -380,7 +381,7 @@ def evolve(
     failed_scenario: dict[str, Any],
     all_scenarios: list[dict[str, Any]],
     n_variants: int = 3,
-    rng: random.Random | None = None,
+    rng: RandomGenerator | None = None,
     stagnation_counter: int = 0,
 ) -> list[dict[str, Any]]:
     """

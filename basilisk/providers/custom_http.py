@@ -10,10 +10,14 @@ import json
 import logging
 import time
 from typing import Any, AsyncIterator
+from urllib.parse import urljoin
 
 import httpx
 
+from basilisk.core.redaction import sanitize_error_text
 from basilisk.providers.base import ProviderAdapter, ProviderMessage, ProviderResponse
+from basilisk.providers.limits import iter_sse_data_limited, read_http_response_limited
+from basilisk.runtime.destination_policy import DestinationPolicy
 
 logger = logging.getLogger("basilisk.providers.http")
 
@@ -34,6 +38,8 @@ class CustomHTTPAdapter(ProviderAdapter):
         request_template: dict[str, Any] | None = None,
         response_content_path: str = "choices.0.message.content",
         timeout: float = 30.0,
+        destination_policy: DestinationPolicy | None = None,
+        max_response_bytes: int = 1_000_000,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._auth_header = auth_header
@@ -41,6 +47,8 @@ class CustomHTTPAdapter(ProviderAdapter):
         self._request_template = request_template or {}
         self._response_content_path = response_content_path
         self._timeout = timeout
+        self._destination_policy = destination_policy or DestinationPolicy()
+        self._max_response_bytes = max_response_bytes
         self._client: httpx.AsyncClient | None = None
 
     @property
@@ -64,7 +72,9 @@ class CustomHTTPAdapter(ProviderAdapter):
             self._client = httpx.AsyncClient(
                 headers=self._build_headers(),
                 timeout=self._timeout,
-                follow_redirects=True,
+                follow_redirects=False,
+                trust_env=False,
+                limits=httpx.Limits(max_keepalive_connections=0),
             )
         return self._client
 
@@ -117,25 +127,62 @@ class CustomHTTPAdapter(ProviderAdapter):
 
         start = time.monotonic()
         try:
-            resp = await client.post(self._base_url, json=body)
+            current_url = self._base_url
+            for redirect_count in range(self._destination_policy.max_redirects + 1):
+                approved = await self._destination_policy.approve(current_url)
+                async with client.stream(
+                    "POST",
+                    approved.connect_url,
+                    json=body,
+                    headers={"Host": approved.host_header},
+                    extensions={"sni_hostname": approved.server_hostname},
+                ) as resp:
+                    if resp.status_code in {301, 302, 303, 307, 308}:
+                        location = resp.headers.get("location", "")
+                        if not location or redirect_count >= self._destination_policy.max_redirects:
+                            raise ValueError("redirect limit reached or redirect location missing")
+                        current_url = urljoin(current_url, location)
+                        continue
+                    resp.raise_for_status()
+                    raw_response = await read_http_response_limited(
+                        resp, self._max_response_bytes
+                    )
+                    data = json.loads(raw_response)
+                    break
+            else:
+                raise ValueError("redirect limit reached")
             latency = (time.monotonic() - start) * 1000
-            resp.raise_for_status()
-            data = resp.json()
             content = self._extract_content(data)
+            usage = data.get("usage", {}) if isinstance(data, dict) else {}
+            choices = data.get("choices", []) if isinstance(data, dict) else []
+            first_choice = choices[0] if choices and isinstance(choices[0], dict) else {}
+            message = first_choice.get("message", {}) if isinstance(first_choice, dict) else {}
 
             return ProviderResponse(
                 content=content,
                 role="assistant",
-                model=model,
+                model=str(data.get("model", model)) if isinstance(data, dict) else model,
                 latency_ms=latency,
-                raw_response=data,
+                input_tokens=int(usage.get("prompt_tokens", 0) or 0),
+                output_tokens=int(usage.get("completion_tokens", 0) or 0),
+                total_tokens=int(usage.get("total_tokens", 0) or 0),
+                finish_reason=str(first_choice.get("finish_reason", "")),
+                tool_calls=list(message.get("tool_calls", []) or []) if isinstance(message, dict) else [],
+                raw_response={
+                    key: data[key]
+                    for key in ("id", "system_fingerprint", "provider", "model_version")
+                    if isinstance(data, dict) and key in data
+                },
             )
         except Exception as e:
             latency = (time.monotonic() - start) * 1000
             return ProviderResponse(
                 content="",
                 latency_ms=latency,
-                error=str(e),
+                error=sanitize_error_text(
+                    e,
+                    secrets=(self._auth_header, *self._custom_headers.values()),
+                ),
             )
 
     async def send_streaming(
@@ -152,22 +199,34 @@ class CustomHTTPAdapter(ProviderAdapter):
             body["model"] = model
 
         try:
-            async with client.stream("POST", self._base_url, json=body) as resp:
-                async for line in resp.aiter_lines():
-                    if line.startswith("data: "):
-                        chunk = line[6:]
-                        if chunk.strip() == "[DONE]":
-                            break
-                        try:
-                            data = json.loads(chunk)
-                            content = self._extract_content(data)
-                            if content:
-                                yield content
-                        except json.JSONDecodeError:
-                            continue
+            approved = await self._destination_policy.approve(self._base_url)
+            async with client.stream(
+                "POST",
+                approved.connect_url,
+                json=body,
+                headers={"Host": approved.host_header},
+                extensions={"sni_hostname": approved.server_hostname},
+            ) as resp:
+                if resp.is_redirect:
+                    raise ValueError("streaming redirects are not allowed")
+                resp.raise_for_status()
+                async for chunk in iter_sse_data_limited(resp, self._max_response_bytes):
+                    if chunk.strip() == "[DONE]":
+                        break
+                    try:
+                        data = json.loads(chunk)
+                        content = self._extract_content(data)
+                        if content:
+                            yield content
+                    except json.JSONDecodeError:
+                        continue
         except Exception as e:
-            logger.warning(f"Streaming error: {e}")
-            return
+            safe_error = sanitize_error_text(
+                e,
+                secrets=(self._auth_header, *self._custom_headers.values()),
+            )
+            logger.warning("Streaming error: %s", safe_error)
+            raise RuntimeError(safe_error) from None
 
     async def close(self) -> None:
         """Close the HTTP client."""

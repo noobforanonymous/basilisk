@@ -7,6 +7,9 @@ import hashlib
 import json
 import os
 import argparse
+import re
+import uuid
+from urllib.parse import quote
 from datetime import datetime, timezone
 from pathlib import Path
 import tomllib
@@ -46,38 +49,104 @@ def iter_manifest_files() -> list[Path]:
     return sorted(files)
 
 
+def _locked_components() -> list[dict[str, str]]:
+    components: list[dict[str, str]] = []
+    for raw_line in (ROOT / "requirements.lock").read_text("utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "==" not in line:
+            continue
+        requirement = line.split("\\", 1)[0].split(";", 1)[0].strip()
+        name, version = requirement.split("==", 1)
+        normalized = re.sub(r"[-_.]+", "-", name).lower()
+        components.append({
+            "type": "library",
+            "name": name,
+            "version": version,
+            "purl": f"pkg:pypi/{normalized}@{version}",
+        })
+    node_lock = ROOT / "desktop" / "package-lock.json"
+    if node_lock.is_file():
+        lock_data = json.loads(node_lock.read_text("utf-8"))
+        for package_path, package in lock_data.get("packages", {}).items():
+            if not package_path.startswith("node_modules/") or not isinstance(package, dict):
+                continue
+            name = package_path.removeprefix("node_modules/")
+            version = str(package.get("version", ""))
+            if not name or not version:
+                continue
+            components.append({
+                "type": "library",
+                "name": name,
+                "version": version,
+                "purl": f"pkg:npm/{quote(name, safe='')}@{version}",
+                "scope": "optional" if package.get("optional") else "required",
+            })
+    return sorted(components, key=lambda item: (item["name"].casefold(), item["version"]))
+
+
 def build_sbom(pyproject: dict) -> dict:
     project = pyproject.get("project", {})
+    lock_identity = "\n".join((
+        sha256_file(ROOT / "requirements.lock"),
+        sha256_file(ROOT / "desktop" / "package-lock.json"),
+    ))
     return {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "name": project.get("name", "basilisk-ai"),
-        "version": project.get("version", "unknown"),
-        "dependencies": project.get("dependencies", []),
-        "optional_dependencies": project.get("optional-dependencies", {}),
+        "bomFormat": "CycloneDX",
+        "specVersion": "1.6",
+        "serialNumber": f"urn:uuid:{uuid.uuid5(uuid.NAMESPACE_URL, lock_identity)}",
+        "version": 1,
+        "metadata": {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "tools": [{"vendor": "Rot Hackers", "name": "Basilisk release manifest", "version": "2"}],
+            "component": {
+                "type": "application",
+                "name": project.get("name", "basilisk-ai"),
+                "version": project.get("version", "unknown"),
+                "purl": f"pkg:pypi/{project.get('name', 'basilisk-ai')}@{project.get('version', 'unknown')}",
+            },
+            "properties": [
+                {"name": "basilisk:python-lock-sha256", "value": sha256_file(ROOT / "requirements.lock")},
+                {"name": "basilisk:desktop-lock-sha256", "value": sha256_file(ROOT / "desktop" / "package-lock.json")},
+            ],
+        },
+        "components": _locked_components(),
     }
 
 
-def build_provenance(pyproject: dict) -> dict:
+def build_provenance(pyproject: dict, assets: list[dict[str, str | int]]) -> dict:
     project = pyproject.get("project", {})
     return {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "builder": {
-            "user": os.environ.get("USER", "unknown"),
-            "cwd": str(ROOT),
-            "python": os.environ.get("VIRTUAL_ENV", ""),
-            "github_run_id": os.environ.get("GITHUB_RUN_ID", ""),
-            "github_run_attempt": os.environ.get("GITHUB_RUN_ATTEMPT", ""),
-            "github_sha": os.environ.get("GITHUB_SHA", ""),
-            "github_ref": os.environ.get("GITHUB_REF", ""),
-        },
-        "subject": {
-            "name": project.get("name", "basilisk-ai"),
-            "version": project.get("version", "unknown"),
-        },
-        "inputs": {
-            "pyproject": sha256_file(PYPROJECT),
-            "requirements": sha256_file(ROOT / "requirements.txt"),
-            "backend_spec": sha256_file(ROOT / "basilisk-backend.spec"),
+        "_type": "https://in-toto.io/Statement/v1",
+        "subject": [
+            {"name": item["path"], "digest": {"sha256": item["sha256"]}}
+            for item in assets
+        ],
+        "predicateType": "https://slsa.dev/provenance/v1",
+        "predicate": {
+            "buildDefinition": {
+                "buildType": "https://github.com/regaan/basilisk/.github/workflows/build.yml@v2",
+                "externalParameters": {
+                    "ref": os.environ.get("GITHUB_REF", ""),
+                    "version": project.get("version", "unknown"),
+                },
+                "internalParameters": {
+                    "run_id": os.environ.get("GITHUB_RUN_ID", ""),
+                    "run_attempt": os.environ.get("GITHUB_RUN_ATTEMPT", ""),
+                },
+                "resolvedDependencies": [
+                    {"uri": "git+https://github.com/regaan/basilisk", "digest": {"gitCommit": os.environ.get("GITHUB_SHA", "")}},
+                    {"uri": "file:pyproject.toml", "digest": {"sha256": sha256_file(PYPROJECT)}},
+                    {"uri": "file:requirements.lock", "digest": {"sha256": sha256_file(ROOT / "requirements.lock")}},
+                    {"uri": "file:desktop/package-lock.json", "digest": {"sha256": sha256_file(ROOT / "desktop" / "package-lock.json")}},
+                ],
+            },
+            "runDetails": {
+                "builder": {"id": "https://github.com/actions/runner"},
+                "metadata": {
+                    "invocationId": os.environ.get("GITHUB_RUN_ID", "local"),
+                    "startedOn": datetime.now(timezone.utc).isoformat(),
+                },
+            },
         },
     }
 
@@ -86,7 +155,7 @@ def iter_release_assets(artifact_root: Path | None) -> list[dict[str, str | int]
     if artifact_root is None or not artifact_root.exists():
         return []
 
-    patterns = ("*.exe", "*.dmg", "*.AppImage", "*.pacman", "*.deb", "*.rpm", "*.zip", "*.tar.gz")
+    patterns = ("*.exe", "*.dmg", "*.AppImage", "*.pacman", "*.deb", "*.rpm", "*.zip", "*.tar.gz", "*.whl")
     assets: list[dict[str, str | int]] = []
     seen: set[Path] = set()
     for pattern in patterns:
@@ -161,7 +230,7 @@ def main() -> int:
         build_metadata_root=build_metadata_root,
     )
     sbom = build_sbom(pyproject)
-    provenance = build_provenance(pyproject)
+    provenance = build_provenance(pyproject, manifest["artifacts"])
 
     (BUILD_DIR / "release-manifest.json").write_text(json.dumps(manifest, indent=2), "utf-8")
     (BUILD_DIR / "sbom.json").write_text(json.dumps(sbom, indent=2), "utf-8")

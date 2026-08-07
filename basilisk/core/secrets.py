@@ -38,13 +38,13 @@ class SecretStore:
         self._secrets_path = self.root_dir / "secrets.enc"
         self._key_path = self.root_dir / "master.key"
         self._lock = Lock()
+        self._key_backend = "local_file"
         self._fernet = Fernet(self._load_or_create_master_key())
 
     def metadata(self) -> dict[str, Any]:
-        key_backend = "os_keychain" if keyring else "local_file"
         return {
             "backend": "fernet_encrypted_file",
-            "key_backend": key_backend,
+            "key_backend": self._key_backend,
             "path": str(self._secrets_path),
             "stored_secrets": len(self.list_keys()),
         }
@@ -73,15 +73,23 @@ class SecretStore:
     def _load_or_create_master_key(self) -> bytes:
         env_key = os.environ.get("BASILISK_MASTER_KEY", "")
         if env_key:
+            source = os.environ.get("BASILISK_MASTER_KEY_SOURCE", "").strip()
+            self._key_backend = (
+                source
+                if source in {"electron_safe_storage", "environment"}
+                else "environment"
+            )
             return env_key.encode("utf-8")
 
         if keyring:
             try:
                 stored = keyring.get_password(_SERVICE_NAME, _MASTER_KEY_NAME)
                 if stored:
+                    self._key_backend = "os_keychain"
                     return stored.encode("utf-8")
                 generated = Fernet.generate_key()
                 keyring.set_password(_SERVICE_NAME, _MASTER_KEY_NAME, generated.decode("utf-8"))
+                self._key_backend = "os_keychain"
                 return generated
             except Exception:
                 pass
@@ -105,8 +113,10 @@ class SecretStore:
             return {}
         try:
             data = self._fernet.decrypt(blob)
-        except InvalidToken:
-            return {}
+        except InvalidToken as exc:
+            raise ValueError(
+                "Basilisk could not decrypt the secret store; refusing to overwrite it"
+            ) from exc
         return json.loads(data.decode("utf-8"))
 
     def _write_payload(self, payload: dict[str, str]) -> None:
@@ -120,16 +130,13 @@ class SecretStore:
 
 
 def _resolve_store_dir(base: Path) -> Path:
-    """Choose a writable secret-store directory, falling back when needed."""
-    candidates = [
-        base,
-        Path.cwd() / ".basilisk",
-        Path("/tmp/basilisk-secrets"),
-    ]
-    for candidate in candidates:
-        try:
-            candidate.mkdir(parents=True, exist_ok=True)
-            return candidate
-        except OSError:
-            continue
-    raise OSError("Unable to create a writable Basilisk secret store directory")
+    """Create the requested private store without falling back to shared directories."""
+    expanded = base.expanduser()
+    if expanded.exists() and expanded.is_symlink():
+        raise OSError(f"Refusing symlinked Basilisk secret store: {expanded}")
+    candidate = expanded.resolve(strict=False)
+    try:
+        candidate.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise OSError(f"Unable to create Basilisk secret store: {candidate}") from exc
+    return candidate

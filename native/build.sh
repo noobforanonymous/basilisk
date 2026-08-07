@@ -12,7 +12,7 @@
 #   Go → libbasilisk_fuzzer  (15 mutation operators, crossover, batch ops)
 #   Go → libbasilisk_matcher (Aho-Corasick, refusal/compliance/sensitive detection)
 #
-# Requirements:
+# Requirements (including Git Bash/MSYS2 on Windows):
 #   - Go 1.21+
 #   - GCC or Clang with -shared/-fPIC support
 #   - Linux x86_64 or ARM64
@@ -189,9 +189,36 @@ clean() {
     log_info "Clean complete"
 }
 
+exported_symbols() {
+    local library_path="$1"
+    if [[ "${SO_EXT}" == ".dll" || "${SO_EXT}" == ".dylib" ]]; then
+        nm -g "${library_path}" 2>/dev/null
+    else
+        nm -D -g "${library_path}" 2>/dev/null
+    fi
+}
+
+has_exported_symbol() {
+    local library_path="$1"
+    local required_symbol="$2"
+    exported_symbols "${library_path}" | awk -v required="${required_symbol}" '
+        $2 ~ /^[Tt]$/ {
+            name = $NF
+            sub(/^_/, "", name)
+            if (name == required) found = 1
+        }
+        END { exit(found ? 0 : 1) }
+    '
+}
+
 verify() {
     log_info "Verifying native extensions..."
     local all_ok=true
+
+    if ! command -v nm >/dev/null 2>&1; then
+        log_error "The nm symbol inspection tool is required for native verification"
+        exit 1
+    fi
 
     # Check C libraries
     for lib in libbasilisk_tokens libbasilisk_encoder; do
@@ -211,7 +238,8 @@ verify() {
         if [ -f "${path}" ]; then
             local size=$(stat -c%s "${path}" 2>/dev/null || stat -f%z "${path}" 2>/dev/null)
             # Verify exported symbols
-            local exports=$(nm -D "${path}" 2>/dev/null | grep -c ' T ' || echo 0)
+            local exports
+            exports=$(exported_symbols "${path}" | awk '$2 ~ /^[Tt]$/ {count++} END {print count + 0}')
             log_info "  ✓ ${lib} (${size} bytes, ${exports} exports)"
         else
             log_error "  ✗ ${lib} — NOT FOUND"
@@ -223,10 +251,11 @@ verify() {
     local fuzzer_path="${LIB_DIR}/libbasilisk_fuzzer${SO_EXT}"
     if [ -f "${fuzzer_path}" ]; then
         for sym in BasiliskMutate BasiliskCrossover BasiliskBatchMutate BasiliskPopulationDiversity BasiliskGetMutationCount; do
-            if nm -D "${fuzzer_path}" 2>/dev/null | grep -q "${sym}"; then
+            if has_exported_symbol "${fuzzer_path}" "${sym}"; then
                 log_info "    └─ ${sym}: ✓"
             else
-                log_warn "    └─ ${sym}: MISSING"
+                log_error "    └─ ${sym}: MISSING"
+                all_ok=false
             fi
         done
     fi
@@ -235,10 +264,11 @@ verify() {
     local matcher_path="${LIB_DIR}/libbasilisk_matcher${SO_EXT}"
     if [ -f "${matcher_path}" ]; then
         for sym in BasiliskDetectRefusal BasiliskDetectCompliance BasiliskDetectSensitiveData BasiliskMatcherSearch; do
-            if nm -D "${matcher_path}" 2>/dev/null | grep -q "${sym}"; then
+            if has_exported_symbol "${matcher_path}" "${sym}"; then
                 log_info "    └─ ${sym}: ✓"
             else
-                log_warn "    └─ ${sym}: MISSING"
+                log_error "    └─ ${sym}: MISSING"
+                all_ok=false
             fi
         done
     fi
