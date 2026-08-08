@@ -37,8 +37,7 @@ def build_metadata(platform: str) -> dict:
         )
     else:
         warning = (
-            "COMMUNITY BUILD: Linux artifacts are CI-built and release metadata signed, "
-            "but they do not carry Apple/Windows vendor certificate trust."
+            "COMMUNITY BUILD: Linux packages are unsigned and include keyless CI provenance."
         )
 
     trust_model = "vendor-signed" if vendor_signed else "community-build"

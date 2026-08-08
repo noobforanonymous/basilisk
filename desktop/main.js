@@ -6,7 +6,7 @@ const crypto = require('crypto');
 const http = require('http');
 const net = require('net');
 const os = require('os');
-const { buildBackendEnv } = require('./backend-env');
+const { buildBackendEnv, buildPackagedBackendOptions } = require('./backend-env');
 
 // Generate a random token for backend authentication
 const BASILISK_TOKEN = crypto.randomBytes(32).toString('hex');
@@ -551,7 +551,7 @@ function startBackend() {
             } catch (e) { /* system install, already +x */ }
         }
 
-        options = { stdio: 'pipe', env: backendEnv() };
+        options = buildPackagedBackendOptions(backendEnv(), app.getPath('userData'));
     } else {
         // Dev mode — use venv python if available
         const projectRoot = path.join(__dirname, '..');

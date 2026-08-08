@@ -5,6 +5,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from scripts import write_build_metadata
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -46,3 +48,14 @@ def test_linux_lifecycle_launches_the_packaged_electron_binary():
 
     assert "command -v basilisk" not in script
     assert "readlink -f /usr/bin/basilisk" in script
+
+
+def test_linux_community_metadata_is_explicitly_unsigned(monkeypatch):
+    monkeypatch.delenv("BASILISK_HAS_WINDOWS_SIGNING", raising=False)
+    monkeypatch.delenv("BASILISK_HAS_APPLE_SIGNING", raising=False)
+
+    metadata = write_build_metadata.build_metadata("Linux")
+
+    assert metadata["trust_model"] == "community-build"
+    assert metadata["vendor_signed"] is False
+    assert "unsigned" in metadata["warning"].lower()
