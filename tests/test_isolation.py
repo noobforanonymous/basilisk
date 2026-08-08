@@ -142,6 +142,7 @@ def test_worker_supervisor_passes_only_secret_references(monkeypatch):
         return FakeProcess(command, **kwargs)
 
     monkeypatch.delenv("BASILISK_RESTRICTED_WORKER", raising=False)
+    monkeypatch.setenv("OPENBLAS_NUM_THREADS", "4")
     monkeypatch.setattr("basilisk.runtime.isolation.subprocess.Popen", fake_popen)
     result = spawn_restricted_scan({
         "target": "https://example.test/v1/chat/completions",
@@ -153,6 +154,9 @@ def test_worker_supervisor_passes_only_secret_references(monkeypatch):
 
     assert result == 0
     assert captured["kwargs"]["env"]["BASILISK_RESTRICTED_WORKER"] == "1"
+    assert captured["kwargs"]["env"]["OPENBLAS_NUM_THREADS"] == "1"
+    assert captured["kwargs"]["env"]["OMP_NUM_THREADS"] == "1"
+    assert captured["kwargs"]["env"]["TOKENIZERS_PARALLELISM"] == "false"
     assert captured["request"]["arguments"]["api_key"] == "@.secrets/provider-key"
     assert "nvapi" not in str(captured["request"])
 

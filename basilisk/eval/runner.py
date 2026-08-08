@@ -24,6 +24,12 @@ from basilisk.eval.assertions import evaluate_assertion, AssertionResult
 logger = logging.getLogger("basilisk.eval")
 
 
+def _elapsed_ms(start_ns: int, *, minimum_ms: float = 0.001) -> float:
+    """Return a positive elapsed duration, even on coarse platform clocks."""
+    elapsed = (time.perf_counter_ns() - start_ns) / 1_000_000
+    return max(elapsed, minimum_ms)
+
+
 @dataclass
 class EvalTestResult:
     """Result of running a single eval test."""
@@ -153,7 +159,7 @@ class EvalRunner:
             started_at=datetime.now(timezone.utc).isoformat(),
         )
 
-        start = time.monotonic()
+        start = time.perf_counter_ns()
 
         # Create provider if not injected
         provider = self.provider
@@ -197,7 +203,7 @@ class EvalRunner:
                     logger.exception("Eval provider cleanup failed")
 
         result.completed_at = datetime.now(timezone.utc).isoformat()
-        result.total_duration_ms = (time.monotonic() - start) * 1000
+        result.total_duration_ms = _elapsed_ms(start)
 
         return result
 
@@ -211,7 +217,7 @@ class EvalRunner:
 
     async def _run_test(self, test: EvalTest, provider: Any) -> EvalTestResult:
         """Run a single test and evaluate its assertions."""
-        start = time.monotonic()
+        start = time.perf_counter_ns()
         timeout = self._effective_timeout(test)
 
         try:
@@ -240,7 +246,7 @@ class EvalRunner:
                     response="",
                     passed=False,
                     error="TIMEOUT",
-                    duration_ms=(time.monotonic() - start) * 1000,
+                    duration_ms=_elapsed_ms(start, minimum_ms=timeout * 1000),
                 )
 
             response_text = response.content or ""
@@ -269,7 +275,7 @@ class EvalRunner:
                 response=response_text,
                 passed=all_passed,
                 assertions=assertion_results,
-                duration_ms=(time.monotonic() - start) * 1000,
+                duration_ms=_elapsed_ms(start),
             )
 
         except Exception as e:
@@ -281,7 +287,7 @@ class EvalRunner:
                 response="",
                 passed=False,
                 error=sanitize_error_text(e),
-                duration_ms=(time.monotonic() - start) * 1000,
+                duration_ms=_elapsed_ms(start),
             )
 
     async def _create_provider(self) -> Any:
