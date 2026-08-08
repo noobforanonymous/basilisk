@@ -17,6 +17,7 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from basilisk import __version__
 from basilisk.api import eval as eval_api
 from basilisk.api import auth as auth_api
 from basilisk.api import benchmark as benchmark_api
@@ -57,7 +58,7 @@ def create_app(*, enable_docs: bool | None = None) -> FastAPI:
     docs = _docs_enabled(default=False) if enable_docs is None else enable_docs
     app = FastAPI(
         title="Basilisk Desktop Backend",
-        version="2.0.0",
+        version=__version__,
         docs_url="/docs" if docs else None,
         redoc_url="/redoc" if docs else None,
         openapi_url="/openapi.json" if docs else None,

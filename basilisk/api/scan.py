@@ -11,6 +11,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
 
+from basilisk import __version__
 from basilisk.api.shared import (
     BASILISK_TOKEN,
     DiffConfig,
@@ -115,7 +116,7 @@ async def _load_runtime_state(session_id: str, db_path: str = "./basilisk-sessio
 
 @router.get("/health")
 async def health():
-    return {"status": "online", "version": "2.0.0", "timestamp": datetime.now(timezone.utc).isoformat()}
+    return {"status": "online", "version": __version__, "timestamp": datetime.now(timezone.utc).isoformat()}
 
 
 @router.get("/api/native/status", dependencies=[Depends(verify_token)])

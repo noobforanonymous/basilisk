@@ -100,10 +100,13 @@ const BACKEND_ALLOWLIST = {
 function writeE2EStatus(data) {
     if (!E2E_MODE || !E2E_OUT) return;
     try {
-        fs.writeFileSync(E2E_OUT, JSON.stringify({
+        const payload = JSON.stringify({
             timestamp: new Date().toISOString(),
             ...data,
-        }, null, 2));
+        }, null, 2);
+        const temporary = `${E2E_OUT}.${process.pid}.tmp`;
+        fs.writeFileSync(temporary, payload, 'utf8');
+        fs.renameSync(temporary, E2E_OUT);
         const terminalStage = data.uiReady || ['backend_exit', 'backend_timeout', 'ui_error', 'backend_error', 'startup_error'].includes(data.stage);
         if (process.env.BASILISK_E2E_AUTOEXIT === '1' && terminalStage) {
             setTimeout(() => app.quit(), 300);

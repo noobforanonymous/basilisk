@@ -9,6 +9,41 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
 
 from basilisk import native_bridge
+from scripts import sign_native_manifests
+
+
+def _clear_native_signing_environment(monkeypatch):
+    for name in (
+        "BASILISK_NATIVE_SIGNING_KEY",
+        "BASILISK_RELEASE_SIGNING_KEY",
+        "BASILISK_NATIVE_SIGNING_KEY_FILE",
+        "BASILISK_RELEASE_SIGNING_KEY_FILE",
+        "BASILISK_ALLOW_EPHEMERAL_NATIVE_SIGNING",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+
+def test_ephemeral_native_signing_key_requires_explicit_opt_in(tmp_path, monkeypatch):
+    _clear_native_signing_environment(monkeypatch)
+    monkeypatch.setattr(sign_native_manifests, "BUILD_DIR", tmp_path / "build")
+
+    with pytest.raises(SystemExit, match="Missing signing key file"):
+        sign_native_manifests.load_private_key()
+
+
+def test_ephemeral_native_signing_key_is_generated_for_community_build(tmp_path, monkeypatch):
+    _clear_native_signing_environment(monkeypatch)
+    build_dir = tmp_path / "build"
+    monkeypatch.setattr(sign_native_manifests, "BUILD_DIR", build_dir)
+    monkeypatch.setenv("BASILISK_ALLOW_EPHEMERAL_NATIVE_SIGNING", "true")
+
+    generated = sign_native_manifests.load_private_key()
+    stored = ed25519.Ed25519PrivateKey.from_private_bytes(
+        (build_dir / "release-signing.key").read_bytes()
+    )
+    message = b"community-build-integrity"
+
+    stored.public_key().verify(generated.sign(message), message)
 
 
 def test_verify_library_integrity_accepts_matching_manifest(tmp_path):
