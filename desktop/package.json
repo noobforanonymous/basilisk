@@ -11,7 +11,7 @@
     "scripts": {
         "start": "electron .",
         "dev": "electron .",
-        "test:e2e": "node --test tests/e2e-smoke.js",
+        "test:e2e": "node --test tests/backend-env.test.js tests/e2e-smoke.js",
         "benchmark": "node ../benchmarks/desktop/run.js",
         "dist": "electron-builder",
         "build": "electron-builder",
@@ -95,6 +95,7 @@
         },
         "files": [
             "main.js",
+            "backend-env.js",
             "preload.js",
             "src/**/*"
         ],

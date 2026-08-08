@@ -50,7 +50,7 @@ function waitForSnapshot(child, filePath, timeoutMs = 30000) {
         const timer = setInterval(() => {
             if (fs.existsSync(filePath)) {
                 lastSnapshot = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-                const isTerminal = lastSnapshot.uiReady || ['backend_timeout', 'ui_error', 'backend_error', 'startup_error'].includes(lastSnapshot.stage);
+                const isTerminal = lastSnapshot.uiReady || ['backend_exit', 'backend_timeout', 'ui_error', 'backend_error', 'startup_error'].includes(lastSnapshot.stage);
                 if (isTerminal) {
                     clearInterval(timer);
                     if (lastSnapshot.uiReady) {
