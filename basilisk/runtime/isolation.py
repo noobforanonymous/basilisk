@@ -18,6 +18,21 @@ from typing import Any
 logger = logging.getLogger("basilisk.isolation")
 
 
+# Restricted workers have a deliberately small process/thread allowance.  Native
+# numerical libraries otherwise inherit host defaults and may exhaust that
+# allowance before a scan starts (for example, OpenBLAS on GitHub runners).
+_NATIVE_THREAD_LIMIT_ENV = (
+    "BLIS_NUM_THREADS",
+    "GOTO_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "NUMEXPR_NUM_THREADS",
+    "OMP_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "RAYON_NUM_THREADS",
+    "VECLIB_MAXIMUM_THREADS",
+)
+
+
 class WorkerPolicyViolation(PermissionError):
     """The restricted worker attempted an undeclared local capability."""
 
@@ -261,6 +276,9 @@ def spawn_restricted_scan(arguments: dict[str, Any]) -> int:
         env["PYTHONDONTWRITEBYTECODE"] = "1"
         env["TMP"] = temporary
         env["TEMP"] = temporary
+        for variable in _NATIVE_THREAD_LIMIT_ENV:
+            env[variable] = "1"
+        env["TOKENIZERS_PARALLELISM"] = "false"
         command = [sys.executable, "-m", "basilisk.runtime.scan_worker", str(request_path)]
         creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
         process = subprocess.Popen(
