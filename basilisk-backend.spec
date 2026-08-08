@@ -251,14 +251,12 @@ a = Analysis(
         'sklearn.metrics',
         'sklearn.metrics.pairwise',
 
-        # ── pkg_resources / setuptools chain (jaraco crash fix) ──
-        'pkg_resources',
+        # ── Keyring/importlib metadata support ──
         'jaraco',
         'jaraco.text',
         'jaraco.functools',
         'jaraco.context',
         'importlib_metadata',
-        'setuptools',
     ],
     hookspath=[],
     hooksconfig={},
@@ -271,6 +269,10 @@ a = Analysis(
         'scipy',
         'pytest',
         'pyinstaller',
+        # Build-only packages. Bundling pkg_resources activates a PyInstaller
+        # runtime hook that is incompatible with current setuptools on macOS.
+        'pkg_resources',
+        'setuptools',
         'pip',
     ],
     noarchive=False,
