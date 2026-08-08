@@ -1,5 +1,7 @@
 'use strict';
 
+const path = require('node:path');
+
 /**
  * Build the environment for the long-lived desktop API sidecar.
  *
@@ -25,4 +27,15 @@ function buildBackendEnv(baseEnv, {
     return env;
 }
 
-module.exports = { buildBackendEnv };
+function buildPackagedBackendOptions(env, userDataDir) {
+    if (!userDataDir || !path.isAbsolute(userDataDir)) {
+        throw new Error('Packaged backend user-data directory must be an absolute path');
+    }
+    return {
+        cwd: userDataDir,
+        stdio: 'pipe',
+        env,
+    };
+}
+
+module.exports = { buildBackendEnv, buildPackagedBackendOptions };
