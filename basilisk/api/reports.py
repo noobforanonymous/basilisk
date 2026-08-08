@@ -35,10 +35,9 @@ async def generate_report(session_id: str, req: ReportRequest):
 
         from basilisk.report.generator import generate_report as gen
         output_cfg = OutputConfig(format=req.format, output_dir="./basilisk-reports")
-        path = await gen(session, output_cfg)
+        path = os.path.abspath(await gen(session, output_cfg))
         if req.open_browser:
-            abs_path = os.path.abspath(path)
-            file_url = f"file://{abs_path}" if sys.platform != "win32" else abs_path
+            file_url = f"file://{path}" if sys.platform != "win32" else path
             webbrowser.open(file_url)
         return {"path": path, "format": req.format}
     except HTTPException:

@@ -7,10 +7,11 @@ from fastapi import HTTPException
 
 from basilisk.api.scan import preview_scan, start_diff_scan
 from basilisk.api.auth import AuthMatrixRequest, authorization_matrix
+from basilisk.api.reports import generate_report
 from basilisk.desktop_backend import create_app
 from pydantic import ValidationError
 
-from basilisk.api.shared import DiffConfig, PostureConfig, ScanConfig
+from basilisk.api.shared import DiffConfig, PostureConfig, ReportRequest, ScanConfig, active_scans
 
 
 async def test_diff_requires_two_targets_without_converting_400_to_500():
@@ -73,3 +74,22 @@ def test_desktop_auth_matrix_rejects_inline_credentials_and_is_registered():
             route.path for route in getattr(router, "routes", []) if hasattr(route, "path")
         )
     assert "/api/auth/matrix" in registered
+
+
+async def test_generated_report_path_is_absolute_for_packaged_desktop(tmp_path, monkeypatch):
+    session_id = "packaged-report-regression"
+    relative_path = "basilisk-reports/report.html"
+    report_path = tmp_path / relative_path
+    report_path.parent.mkdir()
+    report_path.write_text("<html></html>", encoding="utf-8")
+
+    async def fake_generate_report(_session, _output_config):
+        return relative_path
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setitem(active_scans, session_id, {"session": object()})
+    monkeypatch.setattr("basilisk.report.generator.generate_report", fake_generate_report)
+
+    result = await generate_report(session_id, ReportRequest(format="html"))
+
+    assert result["path"] == str(report_path.resolve())
