@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import subprocess
 import sys
 from pathlib import Path
@@ -17,3 +18,31 @@ def test_dependency_locks_and_release_commands_are_reproducible():
         check=False,
     )
     assert completed.returncode == 0, completed.stderr or completed.stdout
+
+
+def test_desktop_sidecar_keeps_build_only_setuptools_out_of_runtime():
+    tree = ast.parse((ROOT / "basilisk-backend.spec").read_text("utf-8"))
+    analysis = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "Analysis"
+    )
+    keyword_values = {
+        keyword.arg: ast.literal_eval(keyword.value)
+        for keyword in analysis.keywords
+        if keyword.arg in {"hiddenimports", "excludes"}
+    }
+
+    assert "pkg_resources" not in keyword_values["hiddenimports"]
+    assert "setuptools" not in keyword_values["hiddenimports"]
+    assert "pkg_resources" in keyword_values["excludes"]
+    assert "setuptools" in keyword_values["excludes"]
+
+
+def test_linux_lifecycle_launches_the_packaged_electron_binary():
+    script = (ROOT / "desktop" / "tests" / "linux-package-lifecycle.sh").read_text("utf-8")
+
+    assert "command -v basilisk" not in script
+    assert "readlink -f /usr/bin/basilisk" in script

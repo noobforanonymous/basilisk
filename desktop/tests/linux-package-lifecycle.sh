@@ -21,7 +21,8 @@ trap cleanup EXIT
 
 sudo apt-get install -y "$BASELINE_DEB"
 BASELINE_VERSION="$(dpkg-query -W -f='${Version}' "$PACKAGE_NAME")"
-APP_EXECUTABLE="$(command -v basilisk)"
+APP_EXECUTABLE="$(readlink -f /usr/bin/basilisk)"
+test -x "$APP_EXECUTABLE"
 xvfb-run --auto-servernum node "$ROOT/desktop/tests/packaged-smoke.js" "$APP_EXECUTABLE"
 
 sudo apt-get install -y "$CURRENT_DEB"
