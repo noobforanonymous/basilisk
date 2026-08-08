@@ -101,12 +101,6 @@ def main():
     parser.add_argument("--debug", action="store_true")
     args = parser.parse_args()
 
-    if os.environ.get("BASILISK_RESTRICTED_WORKER") == "1":
-        from basilisk.runtime.isolation import WorkerLimits, apply_worker_limits
-
-        backend = apply_worker_limits(WorkerLimits(), include_cpu=False)
-        logger.info("Desktop backend process isolation: %s", backend)
-
     log_level = "debug" if args.debug else "info"
     uvicorn.run(
         create_app(enable_docs=bool(args.debug or _docs_enabled(default=False))),

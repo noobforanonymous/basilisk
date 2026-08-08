@@ -34,7 +34,7 @@ async function waitForTerminalSnapshot(child, outputPath, timeoutMs = 90000) {
             try {
                 const snapshot = JSON.parse(fs.readFileSync(outputPath, 'utf8'));
                 if (snapshot.stage === 'ui_ready') return snapshot;
-                if (['ui_error', 'backend_error', 'backend_timeout', 'startup_error'].includes(snapshot.stage)) {
+                if (['ui_error', 'backend_error', 'backend_exit', 'backend_timeout', 'startup_error'].includes(snapshot.stage)) {
                     throw new Error(`${snapshot.stage}: ${snapshot.error || 'unknown error'}\n${stderr}`);
                 }
             } catch (error) {

@@ -6,6 +6,7 @@ const crypto = require('crypto');
 const http = require('http');
 const net = require('net');
 const os = require('os');
+const { buildBackendEnv } = require('./backend-env');
 
 // Generate a random token for backend authentication
 const BASILISK_TOKEN = crypto.randomBytes(32).toString('hex');
@@ -103,7 +104,7 @@ function writeE2EStatus(data) {
             timestamp: new Date().toISOString(),
             ...data,
         }, null, 2));
-        const terminalStage = data.uiReady || ['backend_timeout', 'ui_error', 'backend_error', 'startup_error'].includes(data.stage);
+        const terminalStage = data.uiReady || ['backend_exit', 'backend_timeout', 'ui_error', 'backend_error', 'startup_error'].includes(data.stage);
         if (process.env.BASILISK_E2E_AUTOEXIT === '1' && terminalStage) {
             setTimeout(() => app.quit(), 300);
         }
@@ -258,17 +259,12 @@ function updatesAllowed() {
 }
 
 function backendEnv() {
-    const env = {
-        ...process.env,
-        BASILISK_PORT: backendPort,
-        BASILISK_TOKEN: BASILISK_TOKEN,
-        BASILISK_RESTRICTED_WORKER: '1',
-    };
-    if (desktopMasterKey) {
-        env.BASILISK_MASTER_KEY = desktopMasterKey;
-        env.BASILISK_MASTER_KEY_SOURCE = desktopMasterKeyBackend;
-    }
-    return env;
+    return buildBackendEnv(process.env, {
+        port: backendPort,
+        token: BASILISK_TOKEN,
+        masterKey: desktopMasterKey,
+        masterKeyBackend: desktopMasterKeyBackend,
+    });
 }
 
 function isFernetKey(value) {
@@ -631,6 +627,9 @@ function startBackend() {
 
 async function waitForBackendReady(attempts = 120) {
     for (let i = 0; i < attempts; i++) {
+        if (!pythonProcess || pythonProcess.exitCode !== null || pythonProcess.signalCode !== null) {
+            return;
+        }
         try {
             const health = await backendGet('/health');
             if (health && health.status === 'online') {

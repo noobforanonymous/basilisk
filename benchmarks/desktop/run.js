@@ -169,7 +169,7 @@ function waitForResult(child, outputPath, timeoutMs = 150000) {
                     resolve({ data, stdout, stderr });
                     return;
                 }
-                if (['ui_error', 'backend_error', 'backend_timeout', 'startup_error'].includes(data.stage)) {
+                if (['ui_error', 'backend_error', 'backend_exit', 'backend_timeout', 'startup_error'].includes(data.stage)) {
                     clearInterval(timer);
                     reject(new Error(`${data.stage}: ${data.error || 'unknown error'}\n${stderr}`));
                     return;
