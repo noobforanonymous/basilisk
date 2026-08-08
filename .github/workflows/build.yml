@@ -1,10 +1,21 @@
-name: Build, Sign, and Release Basilisk Desktop
+name: Build and Release Basilisk Desktop
 
 on:
   push:
     tags:
       - 'v*.*.*'
   workflow_dispatch:
+    inputs:
+      community_release:
+        description: Build unsigned Community installers and publish a release
+        required: true
+        type: boolean
+        default: false
+      release_tag:
+        description: Release tag used only for a Community release
+        required: true
+        type: string
+        default: v2.0.2
 
 permissions:
   contents: read
@@ -13,18 +24,32 @@ jobs:
   quality:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: '3.11'
           cache: pip
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version: '1.21'
           cache: false
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 20
+      - name: Validate Community release tag
+        if: github.event_name == 'workflow_dispatch' && inputs.community_release
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+            echo "Community release tag must use vMAJOR.MINOR.PATCH" >&2
+            exit 1
+          }
+          PROJECT_VERSION="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          test "$RELEASE_TAG" = "v$PROJECT_VERSION" || {
+            echo "Release tag $RELEASE_TAG does not match project version v$PROJECT_VERSION" >&2
+            exit 1
+          }
       - name: Verify dependency locks
         run: python scripts/verify_dependency_locks.py
       - name: Install and test Python
@@ -75,7 +100,10 @@ jobs:
       WINDOWS_SIGNING_CERT_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERT_PASSWORD }}
       COSIGN_KEY_REF: ${{ secrets.COSIGN_KEY_REF }}
       BASILISK_NATIVE_SIGNING_KEY: ${{ secrets.BASILISK_NATIVE_SIGNING_KEY }}
+      BASILISK_ALLOW_EPHEMERAL_NATIVE_SIGNING: ${{ github.event_name == 'workflow_dispatch' && inputs.community_release }}
       BASILISK_REQUIRE_VENDOR_TRUST: ${{ startsWith(github.ref, 'refs/tags/v') }}
+      BASILISK_SKIP_NOTARIZE: ${{ github.event_name == 'workflow_dispatch' && inputs.community_release && '1' || '0' }}
+      CSC_IDENTITY_AUTO_DISCOVERY: ${{ github.event_name == 'workflow_dispatch' && inputs.community_release && 'false' || 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -83,20 +111,20 @@ jobs:
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 20
 
       - name: Setup Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: '3.11'
 
       - name: Setup Go
-        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version: '1.21'
           cache: false
@@ -132,7 +160,7 @@ jobs:
         shell: bash
 
       - name: Verify and embed native integrity trust
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.community_release)
         run: |
           python scripts/verify_native_manifests.py native/build basilisk/native_libs
           python scripts/embed_native_public_key.py
@@ -296,7 +324,7 @@ jobs:
         shell: bash
 
       - name: Setup Apple Code Signing Identity
-        if: runner.os == 'macOS' && env.APPLE_SIGNING_CERT_BASE64 != ''
+        if: runner.os == 'macOS' && env.BASILISK_REQUIRE_VENDOR_TRUST == 'true' && env.APPLE_SIGNING_CERT_BASE64 != ''
         run: |
           CERT_PATH="$RUNNER_TEMP/apple-signing-cert.p12"
           KEYCHAIN_PATH="$RUNNER_TEMP/basilisk-signing.keychain-db"
@@ -312,7 +340,7 @@ jobs:
         shell: bash
 
       - name: Setup Apple Notarization Credentials
-        if: runner.os == 'macOS' && env.APPLE_TEAM_ID != ''
+        if: runner.os == 'macOS' && env.BASILISK_REQUIRE_VENDOR_TRUST == 'true' && env.APPLE_TEAM_ID != ''
         run: |
           echo "APPLE_TEAM_ID=$APPLE_TEAM_ID" >> "$GITHUB_ENV"
           if [ -n "$APPLE_API_KEY_BASE64" ] && [ -n "$APPLE_API_KEY_ID" ] && [ -n "$APPLE_API_ISSUER" ]; then
@@ -328,7 +356,7 @@ jobs:
         shell: bash
 
       - name: Setup Windows Code Signing Certificate
-        if: runner.os == 'Windows' && env.WINDOWS_SIGNING_CERT_BASE64 != ''
+        if: runner.os == 'Windows' && env.BASILISK_REQUIRE_VENDOR_TRUST == 'true' && env.WINDOWS_SIGNING_CERT_BASE64 != ''
         shell: pwsh
         run: |
           $certPath = Join-Path $env:RUNNER_TEMP "basilisk-windows-signing.p12"
@@ -394,7 +422,7 @@ jobs:
           chmod +x desktop/tests/linux-package-lifecycle.sh
           desktop/tests/linux-package-lifecycle.sh "$baseline_deb" "$current_deb" "$current_appimage"
 
-      - name: Verify macOS signing and packages
+      - name: Verify macOS package structure
         if: runner.os == 'macOS'
         shell: bash
         run: |
@@ -402,7 +430,9 @@ jobs:
           dmg_path=$(find desktop/dist -maxdepth 1 -name '*.dmg' -print -quit)
           test -n "$app_path"
           test -n "$dmg_path"
-          codesign --verify --deep --strict --verbose=2 "$app_path"
+          if [ "$BASILISK_REQUIRE_VENDOR_TRUST" = "true" ]; then
+            codesign --verify --deep --strict --verbose=2 "$app_path"
+          fi
           hdiutil verify "$dmg_path"
 
       - name: Verify macOS install, launch, upgrade, and uninstall
@@ -421,7 +451,7 @@ jobs:
         shell: bash
 
       - name: Staple and validate macOS artifacts
-        if: runner.os == 'macOS' && env.APPLE_SIGNING_CERT_BASE64 != ''
+        if: runner.os == 'macOS' && env.BASILISK_REQUIRE_VENDOR_TRUST == 'true' && env.APPLE_SIGNING_CERT_BASE64 != ''
         working-directory: ./desktop
         run: |
           find dist -maxdepth 3 \( -name '*.app' -o -name '*.dmg' -o -name '*.zip' \) -print0 | while IFS= read -r -d '' file; do
@@ -431,7 +461,7 @@ jobs:
         shell: bash
 
       - name: Upload Build Artifacts
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: Basilisk-${{ matrix.os }}
           path: |
@@ -449,7 +479,7 @@ jobs:
   release:
     needs: build
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.community_release)
     permissions:
       contents: write
       id-token: write
@@ -457,10 +487,10 @@ jobs:
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Setup Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: '3.11'
 
@@ -473,7 +503,7 @@ jobs:
           cp dist/*.whl dist/*.tar.gz artifacts/Python/
 
       - name: Download All Artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           path: artifacts/
 
@@ -487,7 +517,7 @@ jobs:
       - name: Render Release Notes
         run: |
           python scripts/render_release_notes.py \
-            --tag "${{ github.ref_name }}" \
+            --tag "${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}" \
             --artifacts-root artifacts \
             --output build/release-notes.md
 
@@ -523,7 +553,7 @@ jobs:
       - name: Install Cosign
         uses: sigstore/cosign-installer@1aa8e0f2454b781fbf0fbf306a4c9533a0c57409 # v3.7.0
 
-      - name: Sign Release Artifacts and Metadata
+      - name: Create keyless Sigstore provenance proofs
         env:
           COSIGN_YES: "true"
           COSIGN_EXPERIMENTAL: "1"
@@ -537,7 +567,7 @@ jobs:
               "$file"
           done
 
-      - name: Verify externally anchored release signatures
+      - name: Verify keyless Sigstore provenance proofs
         run: |
           EXPECTED_IDENTITY="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/.github/workflows/build.yml@${GITHUB_REF}"
           mapfile -t SIGNATURES < <(find artifacts build -type f -name '*.sig' | sort)
@@ -555,7 +585,7 @@ jobs:
           done
 
       - name: Upload Security Metadata
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: Basilisk-release-security
           path: |
@@ -570,7 +600,9 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
-          name: Basilisk ${{ github.ref_name }}
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+          target_commitish: ${{ github.sha }}
+          name: Basilisk ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
           draft: false
           prerelease: false
           generate_release_notes: false

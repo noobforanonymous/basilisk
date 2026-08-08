@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Basilisk Native Extensions — Build Script v2.0.0
+# Basilisk Native Extensions — Build Script v2.0.2
 #
 # Compiles Go and C native performance modules into shared libraries
 # that Python loads via ctypes for 10-100x speedup on hot paths.
@@ -73,7 +73,7 @@ sign_manifests() {
     local key_inline="${BASILISK_NATIVE_SIGNING_KEY:-${BASILISK_RELEASE_SIGNING_KEY:-}}"
     local key_file="${BASILISK_NATIVE_SIGNING_KEY_FILE:-${BASILISK_RELEASE_SIGNING_KEY_FILE:-${SCRIPT_DIR}/../build/release-signing.key}}"
 
-    if [ -z "${key_inline}" ] && [ ! -f "${key_file}" ]; then
+    if [ -z "${key_inline}" ] && [ ! -f "${key_file}" ] && [ "${BASILISK_ALLOW_EPHEMERAL_NATIVE_SIGNING:-}" != "true" ]; then
         log_warn "No native manifest signing key found; leaving manifests unsigned for this build."
         rm -f "${BUILD_DIR}/manifest.sig" "${LIB_DIR}/manifest.sig" "${SCRIPT_DIR}/../build/native-public.key"
         return 0
@@ -282,7 +282,7 @@ verify() {
 }
 
 show_info() {
-    echo "Basilisk Native Extensions v2.0.0"
+    echo "Basilisk Native Extensions v2.0.2"
     echo ""
     echo "Platform:  ${OS}/${ARCH}"
     echo "Extension: ${SO_EXT}"
@@ -302,7 +302,7 @@ show_info() {
 }
 
 show_help() {
-    echo "Basilisk Native Extensions Build System v2.0.0"
+    echo "Basilisk Native Extensions Build System v2.0.2"
     echo ""
     echo "Usage: $0 [command]"
     echo ""

@@ -6,7 +6,7 @@
 > 📌 DOI: https://doi.org/10.2139/ssrn.6373439
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Version-2.0.0-red?style=for-the-badge" alt="Basilisk version 2.0.0" />
+  <img src="https://img.shields.io/badge/Version-2.0.2-red?style=for-the-badge" alt="Basilisk version 2.0.2" />
   <img src="https://img.shields.io/badge/License-AGPL--3.0-blue?style=for-the-badge" alt="License: AGPL-3.0" />
   <a href="https://doi.org/10.5281/zenodo.18909538"><img src="https://img.shields.io/badge/DOI-10.5281%2Fzenodo.18909538-blue?style=for-the-badge" alt="Zenodo DOI"></a>
   <a href="https://doi.org/10.6084/m9.figshare.31566853"><img src="https://img.shields.io/badge/Mirror-10.6084%2Fm9.figshare.31566853-emerald?style=for-the-badge" alt="Figshare DOI"></a>
@@ -21,7 +21,7 @@
 
 <div align="center">
   <img src="assets/demo.gif" alt="Basilisk AI Red Teaming Demo - Genetic Prompt Evolution Dashboard" style="border-radius: 12px; margin: 20px 0; max-width: 100%; border: 1px solid #1f1f27;" />
-  <p><i>Basilisk v2.0.0 -- Automated LLM Security Testing with Genetic Prompt Evolution</i></p>
+  <p><i>Basilisk v2.0.2 -- Automated LLM Security Testing with Genetic Prompt Evolution</i></p>
   <a href="https://youtu.be/sgFcM1y_omY">
     <img src="https://img.shields.io/badge/Watch-Full%20Demo%20on%20YouTube-red?style=for-the-badge&logo=youtube" alt="Basilisk YouTube Demo" />
   </a>
@@ -64,7 +64,7 @@
      ██╔══██╗██╔══██║╚════██║██║██║     ██║╚════██║██╔═██╗
      ██████╔╝██║  ██║███████║██║███████╗██║███████║██║  ██╗
      ╚═════╝ ╚═╝  ╚═╝╚══════╝╚═╝╚══════╝╚═╝╚══════╝╚═╝  ╚═╝
-                    AI Red Teaming Framework v2.0.0
+                    AI Red Teaming Framework v2.0.2
 ```
 
 ## What is Basilisk?
@@ -73,7 +73,7 @@
 
 Whether you are testing **OpenAI GPT-4o**, **Anthropic Claude**, **Google Gemini**, **NVIDIA API Catalog**, **xAI Grok**, **Meta Llama**, or a custom LLM endpoint, Basilisk provides 33 attack modules, 5 recon modules, differential multi-model scanning, guardrail posture grading, and signed audit logging out of the box.
 
-v2.0.0 introduces support for cryptographically signed native libraries, hash-chained audit logs, a dedicated SQLite worker architecture, evidence-backed findings with trust tiers, and hardened secret handling across the CLI and desktop app.
+v2.0.2 adds deterministic CLI/desktop parity testing, fixes Linux Electron backend startup, and keeps the v2 runtime, evidence, and secret-handling hardening.
 
 ### Why Basilisk?
 
@@ -341,11 +341,11 @@ Performance-critical paths compiled to shared libraries with full Python fallbac
 
 ---
 
-## What's New in v2.0.0
+## What's New in v2.0.2
 
 ### Security Hardening
 
-v2.0.0 focuses on runtime hardening, evidence handling, desktop isolation, and operator workflow improvements:
+v2.0.2 includes the v2 runtime hardening plus release, benchmark, and desktop reliability fixes:
 
 - **Ed25519 Signed Native Libraries** -- Native libraries are loaded only after verifying their SHA-256 hashes against an Ed25519-signed manifest.
 - **Ed25519 Audit Log Signatures** -- Every audit log entry is digitally signed. Legacy HMAC-SHA256 is deprecated. Audit key resolution prefers encrypted local storage over environment variables.
@@ -676,7 +676,7 @@ If you reference Basilisk in research or publications:
   author       = {Regaan},
   title        = {Basilisk: An Evolutionary AI Red-Teaming Framework for Systematic Security Evaluation of Large Language Models},
   year         = {2026},
-  version      = {2.0.0},
+  version      = {2.0.2},
   publisher    = {ROT Independent Security Research Lab},
   doi          = {10.5281/zenodo.18909538},
   url          = {https://doi.org/10.5281/zenodo.18909538}

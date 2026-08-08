@@ -1,6 +1,6 @@
 {
     "name": "basilisk-desktop",
-    "version": "2.0.0",
+    "version": "2.0.2",
     "description": "Basilisk — AI Red Teaming Desktop Application",
     "homepage": "https://github.com/regaan/basilisk",
     "repository": {
@@ -58,10 +58,7 @@
         },
         "win": {
             "target": "nsis",
-            "icon": "build/icon.ico",
-            "signtoolOptions": {
-                "publisherName": "Rot Hackers"
-            }
+            "icon": "build/icon.ico"
         },
         "mac": {
             "target": "dmg",
