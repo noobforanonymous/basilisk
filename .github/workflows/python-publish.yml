@@ -159,7 +159,7 @@ jobs:
           done
 
       - name: Publish release distributions to PyPI
-        uses: pypa/gh-action-pypi-publish@c7c53464625b32c7a7e944ae62b3e17d2b600130 # release/v1
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
           packages-dir: dist/
           skip-existing: true
