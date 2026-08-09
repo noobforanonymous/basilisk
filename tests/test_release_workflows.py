@@ -13,6 +13,10 @@ def test_manual_pypi_publication_is_validated_and_enabled() -> None:
     assert "github.ref == 'refs/heads/main'" in workflow
     assert "Release $RELEASE_TAG does not match pyproject.toml version" in workflow
     assert "build.yml@${SIGNING_REF}" in workflow
+    assert (
+        "pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33"
+        in workflow
+    )
 
 
 def test_release_workflow_dispatches_pypi_publication() -> None:
