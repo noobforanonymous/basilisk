@@ -481,6 +481,7 @@ jobs:
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.community_release)
     permissions:
+      actions: write
       contents: write
       id-token: write
       attestations: write
@@ -623,3 +624,15 @@ jobs:
             build/**/*.pem
             artifacts/**/*.sig
             artifacts/**/*.pem
+
+      - name: Trigger PyPI publication
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+          SIGNING_REF: ${{ github.ref }}
+        run: |
+          gh workflow run python-publish.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            --field release_tag="$RELEASE_TAG" \
+            --field signing_ref="$SIGNING_REF"
