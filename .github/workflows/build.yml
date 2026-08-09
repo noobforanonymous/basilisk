@@ -531,7 +531,6 @@ jobs:
             artifacts/**/*.pacman
             artifacts/**/*.deb
             artifacts/**/*.rpm
-            artifacts/**/*.zip
             artifacts/**/*.tar.gz
             artifacts/**/*.whl
 
@@ -545,7 +544,6 @@ jobs:
             artifacts/**/*.pacman
             artifacts/**/*.deb
             artifacts/**/*.rpm
-            artifacts/**/*.zip
             artifacts/**/*.tar.gz
             artifacts/**/*.whl
           sbom-path: build/sbom.json
@@ -615,7 +613,6 @@ jobs:
             artifacts/**/*.pacman
             artifacts/**/*.deb
             artifacts/**/*.rpm
-            artifacts/**/*.zip
             artifacts/**/*.tar.gz
             artifacts/**/*.whl
             artifacts/**/basilisk-build-metadata.json
