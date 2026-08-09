@@ -10,7 +10,7 @@ from pathlib import Path
 
 def load_statuses(artifacts_root: Path) -> dict[str, dict]:
     statuses: dict[str, dict] = {}
-    for path in sorted(artifacts_root.rglob("basilisk-build-metadata.json")):
+    for path in sorted(artifacts_root.rglob("basilisk-build-metadata-*.json")):
         data = json.loads(path.read_text("utf-8"))
         statuses[str(data.get("platform", "unknown"))] = data
     return statuses
