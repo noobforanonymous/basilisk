@@ -2,6 +2,15 @@ name: Upload Python Package
 
 on:
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Published GitHub release tag to upload to PyPI
+        required: true
+        type: string
+      signing_ref:
+        description: Git ref used by build.yml when the release assets were signed
+        required: true
+        type: string
   release:
     types: [published]
 
@@ -18,6 +27,37 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.x"
+
+      - name: Validate manual publication request
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          SIGNING_REF: ${{ inputs.signing_ref }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "release_tag must use the form vMAJOR.MINOR.PATCH" >&2
+            exit 1
+          fi
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "Manual PyPI publication must run from refs/heads/main" >&2
+            exit 1
+          fi
+          case "$SIGNING_REF" in
+            refs/heads/main|"refs/tags/$RELEASE_TAG") ;;
+            *)
+              echo "signing_ref must be refs/heads/main or refs/tags/$RELEASE_TAG" >&2
+              exit 1
+              ;;
+          esac
+          project_version="$(python -c 'import pathlib, tomllib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text(encoding="utf-8"))["project"]["version"])')"
+          if [ "$RELEASE_TAG" != "v${project_version}" ]; then
+            echo "Release $RELEASE_TAG does not match pyproject.toml version $project_version" >&2
+            exit 1
+          fi
+          test "$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" = "false"
+          test "$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isPrerelease --jq .isPrerelease)" = "false"
 
       - name: Verify dependency locks
         run: python scripts/verify_dependency_locks.py
@@ -39,9 +79,12 @@ jobs:
   pypi-publish:
     runs-on: ubuntu-latest
     if: >-
-      github.event_name == 'release' &&
-      !github.event.release.prerelease &&
-      startsWith(github.event.release.tag_name, 'v')
+      (github.event_name == 'release' &&
+       !github.event.release.prerelease &&
+       startsWith(github.event.release.tag_name, 'v')) ||
+      (github.event_name == 'workflow_dispatch' &&
+       github.ref == 'refs/heads/main' &&
+       startsWith(inputs.release_tag, 'v'))
     needs:
       - release-build
     permissions:
@@ -55,7 +98,7 @@ jobs:
       - name: Retrieve exact signed release distributions
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.event.release.tag_name }}
         run: |
           mkdir -p release-assets dist
           for attempt in $(seq 1 12); do
@@ -88,13 +131,23 @@ jobs:
 
       - name: Verify release signatures and stage distributions
         env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.event.release.tag_name }}
+          SIGNING_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.signing_ref || format('refs/tags/{0}', github.event.release.tag_name) }}
         run: |
-          expected_identity="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/.github/workflows/build.yml@refs/tags/${RELEASE_TAG}"
+          set -euo pipefail
+          expected_identity="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/.github/workflows/build.yml@${SIGNING_REF}"
+          expected_version="${RELEASE_TAG#v}"
           mapfile -t distributions < <(find release-assets -maxdepth 1 -type f \
             \( -name 'basilisk_ai-*.whl' -o -name 'basilisk_ai-*.tar.gz' \) | sort)
           test "${#distributions[@]}" -eq 2
           for distribution in "${distributions[@]}"; do
+            case "$(basename "$distribution")" in
+              "basilisk_ai-${expected_version}-py3-none-any.whl"|"basilisk_ai-${expected_version}.tar.gz") ;;
+              *)
+                echo "Unexpected distribution for $RELEASE_TAG: $distribution" >&2
+                exit 1
+                ;;
+            esac
             test -f "${distribution}.sig" && test -f "${distribution}.pem"
             cosign verify-blob \
               --certificate "${distribution}.pem" \
