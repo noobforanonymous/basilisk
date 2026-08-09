@@ -176,7 +176,7 @@ def load_build_metadata(build_metadata_root: Path | None) -> list[dict]:
     if build_metadata_root is None or not build_metadata_root.exists():
         return []
     data: list[dict] = []
-    for path in sorted(build_metadata_root.rglob("basilisk-build-metadata.json")):
+    for path in sorted(build_metadata_root.rglob("basilisk-build-metadata-*.json")):
         data.append(json.loads(path.read_text("utf-8")))
     return data
 

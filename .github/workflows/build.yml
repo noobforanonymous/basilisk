@@ -447,7 +447,7 @@ jobs:
 
       - name: Copy Build Metadata for Release Artifacts
         run: |
-          cp desktop/build/release-channel.json desktop/dist/basilisk-build-metadata.json
+          cp desktop/build/release-channel.json "desktop/dist/basilisk-build-metadata-${RUNNER_OS}.json"
         shell: bash
 
       - name: Staple and validate macOS artifacts
@@ -473,7 +473,7 @@ jobs:
             desktop/dist/*.rpm
             desktop/dist/*.zip
             desktop/dist/*.tar.gz
-            desktop/dist/basilisk-build-metadata.json
+            desktop/dist/basilisk-build-metadata-*.json
           if-no-files-found: error
 
   release:
@@ -615,7 +615,7 @@ jobs:
             artifacts/**/*.rpm
             artifacts/**/*.tar.gz
             artifacts/**/*.whl
-            artifacts/**/basilisk-build-metadata.json
+            artifacts/**/basilisk-build-metadata-*.json
             build/release-manifest.json
             build/sbom.json
             build/provenance.json
